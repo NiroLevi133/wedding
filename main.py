@@ -53,6 +53,9 @@ def is_allowed(phone_e164: str) -> bool:
         return False
     return phone_e164 in ALLOWED_PHONES
 
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 # === OpenAI client ===
 oaiclient = OpenAI(api_key=OPENAI_API_KEY)
