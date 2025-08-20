@@ -33,10 +33,21 @@ DEFAULT_TZ = os.getenv("DEFAULT_TIMEZONE", "Asia/Jerusalem")
 # Service account path with fallback options
 def get_google_credentials():
     """Get Google credentials from various possible sources"""
+    print("🔍 Looking for Google credentials...")
     
-    # אפשרות 1: משתנה סביבה מ-Secret Manager
+    # אפשרות 1: קובץ ב-volume mount
+    if os.path.exists("/secrets/gcp-credentials"):
+        print("✅ Found credentials at /secrets/gcp-credentials")
+        return "/secrets/gcp-credentials"
+        
+    if os.path.exists("/secrets/gcp_credentials.json"):
+        print("✅ Found credentials at /secrets/gcp_credentials.json")
+        return "/secrets/gcp_credentials.json"
+    
+    # אפשרות 2: משתנה סביבה מ-Secret Manager
     creds_content = os.getenv("secret")
     if creds_content:
+        print("✅ Found credentials in environment variable")
         import tempfile
         import json
         
@@ -49,20 +60,38 @@ def get_google_credentials():
                 decoded = base64.b64decode(creds_content).decode('utf-8')
                 f.write(decoded)
             temp_path = f.name
+            print(f"✅ Created temp credentials file at {temp_path}")
         return temp_path
-    
-    # אפשרות 2: קובץ ב-volume mount
-    if os.path.exists("/secrets/gcp_credentials.json"):
-        return "/secrets/gcp_credentials.json"
     
     # אפשרות 3: קובץ ב-working directory
     if os.path.exists("./gcp_credentials.json"):
+        print("✅ Found credentials at ./gcp_credentials.json")
         return "./gcp_credentials.json"
     
-    # אפשרות 4: משתנה סביבה רגיל
-    return os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "gcp_credentials.json")
+    # אפשרות 4: קובץ ב-app directory
+    if os.path.exists("/app/gcp_credentials.json"):
+        print("✅ Found credentials at /app/gcp_credentials.json")
+        return "/app/gcp_credentials.json"
+    
+    # אפשרות 5: משתנה סביבה רגיל
+    env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if env_path and os.path.exists(env_path):
+        print(f"✅ Found credentials at {env_path}")
+        return env_path
+    
+    # אם כלום לא עבד
+    print("❌ No credentials found in any location!")
+    print("🔍 Checked locations:")
+    print("  - /secrets/gcp_credentials.json")
+    print("  - Environment variable 'secret'")
+    print("  - ./gcp_credentials.json")
+    print("  - /app/gcp_credentials.json")
+    print(f"  - GOOGLE_APPLICATION_CREDENTIALS: {os.getenv('GOOGLE_APPLICATION_CREDENTIALS', 'NOT_SET')}")
+    
+    return None
 
-GOOGLE_CREDENTIALS_PATH = get_google_credentials()
+# אל תגדיר GOOGLE_CREDENTIALS_PATH כאן - זה יקרא בזמן הטעינה
+# GOOGLE_CREDENTIALS_PATH = get_google_credentials()
 
 ALLOWED_PHONES = set(p.strip() for p in (os.getenv("ALLOWED_PHONES","").split(",") if os.getenv("ALLOWED_PHONES") else []))
 
@@ -103,13 +132,22 @@ def ensure_google():
     global creds, drive, sheets
     if drive is not None and sheets is not None:
         return
-    if not os.path.exists(GOOGLE_CREDENTIALS_PATH):
-        raise RuntimeError(f"Google credentials file not found at {GOOGLE_CREDENTIALS_PATH}")
+        
+    print("🔍 Getting Google credentials...")
+    credentials_path = get_google_credentials()
+    if not credentials_path:
+        raise RuntimeError("Google credentials not found in any location!")
+        
+    if not os.path.exists(credentials_path):
+        raise RuntimeError(f"Google credentials file not found at {credentials_path}")
+        
+    print(f"🔑 Using credentials from: {credentials_path}")
     creds = service_account.Credentials.from_service_account_file(
-        GOOGLE_CREDENTIALS_PATH, scopes=SCOPES
+        credentials_path, scopes=SCOPES
     )
     drive = build("drive", "v3", credentials=creds)
     sheets = build("sheets", "v4", credentials=creds)
+    print("✅ Google APIs initialized successfully")
 
 # ========== Utilities ==========
 def chatid_to_e164(chat_id: str) -> str:
