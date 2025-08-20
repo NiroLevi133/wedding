@@ -101,8 +101,16 @@ def sha256_b64(data: bytes) -> str:
 async def greenapi_download_media(id_message: str) -> Tuple[bytes, str]:
     url = f"https://api.green-api.com/waInstance{GREEN_ID}/downloadFile/{GREEN_TOKEN}"
     params = {"idMessage": id_message}
+    
+    print(f"🔽 Downloading media: {url} with idMessage: {id_message}")
+    
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.get(url, params=params)
+        print(f"📊 Response status: {r.status_code}")
+        
+        if r.status_code == 404:
+            raise HTTPException(status_code=400, detail="התמונה לא זמינה. נסה לשלוח תמונה חדשה.")
+        
         r.raise_for_status()
         payload = r.json()
         b64 = payload.get("file")
@@ -258,11 +266,17 @@ async def webhook(request: Request):
                 raise HTTPException(status_code=401, detail="Unauthorized")
 
         payload = await request.json()
+        print(f"📦 Full payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+        
         ensure_google()
 
         type_msg = payload.get("messageData", {}).get("typeMessage")
         chat_id = payload.get("senderData", {}).get("chatId")
         id_message = payload.get("idMessage")
+
+        print(f"📋 Message type: {type_msg}")
+        print(f"👤 Chat ID: {chat_id}")
+        print(f"🆔 Message ID: {id_message}")
 
         if not chat_id:
             return {"status": "ignored", "reason": "no_chat_id"}
@@ -273,9 +287,13 @@ async def webhook(request: Request):
 
         phone = phone_e164
 
+        # בדיקה מפורטת של סוג ההודעה
         if type_msg == "textMessage":
+            print("✅ Processing TEXT message")
             text = payload.get("messageData", {}).get("textMessageData", {}).get("textMessage", "")
             text = text.strip()
+            print(f"📝 Text content: '{text}'")
+            
             if not text:
                 return {"status": "ok"}
 
@@ -288,10 +306,13 @@ async def webhook(request: Request):
                 
                 await greenapi_send_text(chat_id, help_msg)
                 return {"status": "help_sent"}
+            else:
+                # טקסט רגיל - פשוט נגיב
+                await greenapi_send_text(chat_id, f"קיבלתי את ההודעה: '{text}' 📝\nשלח תמונת קבלה לניתוח!")
+                return {"status": "text_received"}
 
-            return {"status": "text_ignored"}
-
-        if type_msg == "imageMessage":
+        elif type_msg == "imageMessage":
+            print("✅ Processing IMAGE message")
             try:
                 await greenapi_send_text(chat_id, "📷 מעבד את התמונה... אנא המתן")
                 
@@ -345,13 +366,14 @@ async def webhook(request: Request):
                 return {"status": "receipt_saved", "expense_id": expense_id, "file_url": file_url}
 
             except Exception as e:
-                await greenapi_send_text(chat_id, f"❌ שגיאה: {str(e)}")
+                await greenapi_send_text(chat_id, f"❌ שגיאה בעיבוד התמונה: {str(e)}")
                 raise
+        else:
+            print(f"❓ Unknown message type: {type_msg}")
+            return {"status": "ignored", "message_type": type_msg, "reason": "unsupported_type"}
 
-        return {"status": "ignored", "message_type": type_msg}
-        
     except Exception as e:
-        print(f"Error in webhook: {str(e)}")
+        print(f"💥 Error in webhook: {str(e)}")
         try:
             if 'chat_id' in locals():
                 await greenapi_send_text(chat_id, "❌ אירעה שגיאה במערכת.")
