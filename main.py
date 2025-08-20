@@ -35,53 +35,76 @@ def get_google_credentials():
     """Get Google credentials from various possible sources"""
     print("🔍 Looking for Google credentials...")
     
-    # אפשרות 1: קובץ ב-volume mount (הנתיב הנכון מהVolume Mount)
-    if os.path.exists("/secrets/gcp-credentials") and os.path.isfile("/secrets/gcp-credentials"):
-        print("✅ Found credentials at /secrets/gcp-credentials")
-        return "/secrets/gcp-credentials"
-        
-    if os.path.exists("/secrets/gcp_credentials.json") and os.path.isfile("/secrets/gcp_credentials.json"):
-        print("✅ Found credentials at /secrets/gcp_credentials.json")
-        return "/secrets/gcp_credentials.json"
+    # רשימה של כל הנתיבים האפשריים
+    possible_paths = [
+        "/secrets/gcp-credentials",
+        "/secrets/gcp_credentials.json", 
+        "/secrets/gcp_credentials",
+        "/secrets",
+        "./gcp_credentials.json",
+        "/app/gcp_credentials.json"
+    ]
     
-    # אפשרות 2: משתנה סביבה מ-Secret Manager
+    print("📁 Checking all possible file paths...")
+    for path in possible_paths:
+        print(f"   Checking {path}:")
+        if os.path.exists(path):
+            print(f"      ✅ Exists")
+            print(f"      📋 Is file: {os.path.isfile(path)}")
+            print(f"      📋 Is dir: {os.path.isdir(path)}")
+            if os.path.isfile(path):
+                try:
+                    with open(path, 'r') as f:
+                        content = f.read(100)
+                    print(f"      📄 Content preview: {content[:50]}...")
+                    return path
+                except Exception as e:
+                    print(f"      ❌ Error reading file: {e}")
+            elif os.path.isdir(path):
+                print(f"      📂 Directory contents:")
+                try:
+                    contents = os.listdir(path)
+                    for item in contents:
+                        item_path = os.path.join(path, item)
+                        print(f"         - {item} ({'file' if os.path.isfile(item_path) else 'dir'})")
+                        if item in ['gcp-credentials', 'gcp_credentials.json', 'credentials.json']:
+                            print(f"      🎯 Found credentials file: {item_path}")
+                            return item_path
+                except Exception as e:
+                    print(f"      ❌ Error listing directory: {e}")
+        else:
+            print(f"      ❌ Does not exist")
+    
+    # אפשרות: משתנה סביבה מ-Secret Manager
+    print("🔑 Checking environment variable 'secret'...")
     creds_content = os.getenv("secret")
     if creds_content:
         print("✅ Found credentials in environment variable")
-        import tempfile
-        import json
+        print(f"   📏 Content length: {len(creds_content)}")
+        print(f"   📝 Content preview: {creds_content[:50]}...")
         
-        # כתוב לקובץ זמני
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-            if creds_content.startswith('{'):
-                f.write(creds_content)
-            else:
-                import base64
-                decoded = base64.b64decode(creds_content).decode('utf-8')
-                f.write(decoded)
-            temp_path = f.name
-            print(f"✅ Created temp credentials file at {temp_path}")
-        return temp_path
-    
-    # אפשרות 3: קובץ ב-working directory
-    if os.path.exists("./gcp_credentials.json"):
-        print("✅ Found credentials at ./gcp_credentials.json")
-        return "./gcp_credentials.json"
-    
-    # אפשרות 4: קובץ ב-app directory
-    if os.path.exists("/app/gcp_credentials.json"):
-        print("✅ Found credentials at /app/gcp_credentials.json")
-        return "/app/gcp_credentials.json"
-    
-    # אפשרות 5: משתנה סביבה רגיל
-    env_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-    if env_path and os.path.exists(env_path):
-        print(f"✅ Found credentials at {env_path}")
-        return env_path
+        import tempfile
+        
+        try:
+            # כתוב לקובץ זמני
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                if creds_content.startswith('{'):
+                    f.write(creds_content)
+                else:
+                    import base64
+                    decoded = base64.b64decode(creds_content).decode('utf-8')
+                    f.write(decoded)
+                temp_path = f.name
+                print(f"✅ Created temp credentials file at {temp_path}")
+            return temp_path
+        except Exception as e:
+            print(f"❌ Error creating temp file: {e}")
+    else:
+        print("   ❌ Environment variable not set")
     
     # אם כלום לא עבד
     print("❌ No credentials found in any location!")
-    print("🔍 Checked locations:")
+    return Noned locations:")
     print("  - /secrets/gcp_credentials.json")
     print("  - Environment variable 'secret'")
     print("  - ./gcp_credentials.json")
