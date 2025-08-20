@@ -13,7 +13,6 @@ from googleapiclient.http import MediaInMemoryUpload
 # OpenAI
 from openai import OpenAI
 
-# Load env vars
 load_dotenv()
 
 app = FastAPI()
@@ -28,28 +27,24 @@ WEBHOOK_SHARED_SECRET = os.getenv("WEBHOOK_SHARED_SECRET", "")
 SHEET_ID = os.getenv("GSHEETS_SPREADSHEET_ID")
 DRIVE_ROOT = os.getenv("GDRIVE_ROOT_FOLDER_ID")
 DEFAULT_CURRENCY = os.getenv("DEFAULT_CURRENCY", "ILS")
-DEFAULT_TZ = os.getenv("DEFAULT_TIMEZONE", "Asia/Jerusalem")
 
-# Google credentials path - עכשיו הקובץ קיים!
-GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "./gcp_credentials.json")
+# Google credentials - עכשיו הקובץ קיים!
+GOOGLE_CREDENTIALS_PATH = "./gcp_credentials.json"
 
 ALLOWED_PHONES = set(p.strip() for p in (os.getenv("ALLOWED_PHONES","").split(",") if os.getenv("ALLOWED_PHONES") else []))
 
-# === Globals for Google clients ===
+# === Globals ===
 SCOPES = ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
 creds = None
 drive = None
 sheets = None
 
-# === OpenAI client ===
 oaiclient = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-# === Session management ===
 pending_until = {}
 last_expense_by_phone = {}
 last_shown_field_by_phone = {}
 
-# Define sheet headers
 SHEET_HEADERS = [
     "expense_id", "owner_phone", "partner_group_id", "date", "amount", "currency",
     "vendor", "category", "payment_method", "invoice_number", "notes",
@@ -76,7 +71,6 @@ def debug():
         "drive_root": DRIVE_ROOT[:10] + "..." if DRIVE_ROOT else "NOT_SET"
     }
 
-# === Init Google APIs ===
 def ensure_google():
     global creds, drive, sheets
     if drive is not None and sheets is not None:
@@ -89,7 +83,6 @@ def ensure_google():
     drive = build("drive", "v3", credentials=creds)
     sheets = build("sheets", "v4", credentials=creds)
 
-# === Utilities ===
 def chatid_to_e164(chat_id: str) -> str:
     if not chat_id:
         return ""
@@ -128,7 +121,6 @@ async def greenapi_send_text(chat_id: str, text: str):
         r = await client.post(url, json=payload)
         r.raise_for_status()
 
-# === Google Drive/Sheets helpers ===
 def ensure_folder(folder_name: str, parent_folder_id: str) -> str:
     ensure_google()
     query = f"name='{folder_name}' and parents in '{parent_folder_id}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
@@ -205,7 +197,6 @@ def build_summary_msg(data: dict) -> str:
     
     return msg
 
-# === OpenAI Vision ===
 async def analyze_receipt_with_openai(img_bytes: bytes) -> Dict[str, Any]:
     if not oaiclient:
         return {
@@ -258,7 +249,6 @@ async def analyze_receipt_with_openai(img_bytes: bytes) -> Dict[str, Any]:
         data["category"] = "אחר"
     return data
 
-# === Webhook ===
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
@@ -283,7 +273,6 @@ async def webhook(request: Request):
 
         phone = phone_e164
 
-        # --- עריכות (טקסט) ---
         if type_msg == "textMessage":
             text = payload.get("messageData", {}).get("textMessageData", {}).get("textMessage", "")
             text = text.strip()
@@ -302,7 +291,6 @@ async def webhook(request: Request):
 
             return {"status": "text_ignored"}
 
-        # --- קבלה (תמונה) ---
         if type_msg == "imageMessage":
             try:
                 await greenapi_send_text(chat_id, "📷 מעבד את התמונה... אנא המתן")
@@ -310,10 +298,8 @@ async def webhook(request: Request):
                 blob, ext = await greenapi_download_media(id_message)
                 file_hash = sha256_b64(blob)
 
-                # ניתוח עם OpenAI
                 ai = await analyze_receipt_with_openai(blob)
 
-                # יצירת מבנה תיקיות ב-Drive
                 today = dt.datetime.now()
                 y = str(today.year)
                 m = f"{today.month:02d}"
@@ -322,13 +308,11 @@ async def webhook(request: Request):
                 folder_year = ensure_folder(y, folder_phone)
                 folder_month = ensure_folder(m, folder_year)
 
-                # העלאה ל-Drive
                 safe_vendor = re.sub(r'[^\w\u0590-\u05FF]+', '_', str(ai.get('vendor') or 'vendor'))
                 fname = f"{today.strftime('%Y%m%d')}_{(ai.get('amount') or 'xxx')}_{safe_vendor}_{file_hash[:8]}.{ext}"
                 
                 file_id, file_url = upload_to_drive(blob, fname, folder_month)
 
-                # יצירת רשומה חדשה
                 expense_id = hashlib.md5((file_hash + phone).encode()).hexdigest()
                 now_iso = ez_now_iso()
                 row_map = {
@@ -352,29 +336,27 @@ async def webhook(request: Request):
                     "approved_at": "",
                 }
 
-                # שמירה בגיליון
                 row_values = [row_map.get(h, "") for h in SHEET_HEADERS]
                 sheets_append_row(row_values)
 
-                # סיכום למשתמש
                 msg = build_summary_msg(row_map)
                 await greenapi_send_text(chat_id, msg)
 
                 return {"status": "receipt_saved", "expense_id": expense_id, "file_url": file_url}
 
+            except Exception as e:
+                await greenapi_send_text(chat_id, f"❌ שגיאה: {str(e)}")
+                raise
+
         return {"status": "ignored", "message_type": type_msg}
         
     except Exception as e:
         print(f"Error in webhook: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        
         try:
             if 'chat_id' in locals():
-                await greenapi_send_text(chat_id, "❌ אירעה שגיאה במערכת. נסה שוב.")
+                await greenapi_send_text(chat_id, "❌ אירעה שגיאה במערכת.")
         except:
             pass
-            
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 if __name__ == "__main__":
