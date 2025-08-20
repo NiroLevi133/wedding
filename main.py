@@ -35,8 +35,13 @@ SHEET_ID = os.getenv("GSHEETS_SPREADSHEET_ID")
 DRIVE_ROOT = os.getenv("GDRIVE_ROOT_FOLDER_ID")
 DEFAULT_CURRENCY = os.getenv("DEFAULT_CURRENCY", "ILS")
 
-# Google credentials - עכשיו הקובץ קיים! (ללא שינוי)
-GOOGLE_CREDENTIALS_PATH = "./gcp_credentials.json"
+# ✅ Google credentials - עכשיו ממשתני סביבה!
+# Google Service Account credentials environment variables
+GOOGLE_PROJECT_ID = os.getenv("GOOGLE_PROJECT_ID")
+GOOGLE_PRIVATE_KEY_ID = os.getenv("GOOGLE_PRIVATE_KEY_ID")
+GOOGLE_PRIVATE_KEY = os.getenv("GOOGLE_PRIVATE_KEY")
+GOOGLE_CLIENT_EMAIL = os.getenv("GOOGLE_CLIENT_EMAIL")
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 ALLOWED_PHONES = set(p.strip() for p in (os.getenv("ALLOWED_PHONES","").split(",") if os.getenv("ALLOWED_PHONES") else []))
 
@@ -87,15 +92,33 @@ def ensure_google():
         return
     
     try:
-        if not os.path.exists(GOOGLE_CREDENTIALS_PATH):
-            raise RuntimeError(f"Google credentials file not found at {GOOGLE_CREDENTIALS_PATH}")
+        # ✅ בניית credentials ממשתני סביבה
+        if not all([GOOGLE_PROJECT_ID, GOOGLE_PRIVATE_KEY, GOOGLE_CLIENT_EMAIL]):
+            raise RuntimeError("Missing required Google credentials environment variables")
         
-        creds = service_account.Credentials.from_service_account_file(
-            GOOGLE_CREDENTIALS_PATH, scopes=SCOPES
+        # ✅ תיקון הפרטי קי - החלפת \\n ב-\n אמיתיים
+        private_key = GOOGLE_PRIVATE_KEY.replace('\\n', '\n')
+        
+        creds_info = {
+            "type": "service_account",
+            "project_id": GOOGLE_PROJECT_ID,
+            "private_key_id": GOOGLE_PRIVATE_KEY_ID,
+            "private_key": private_key,
+            "client_email": GOOGLE_CLIENT_EMAIL,
+            "client_id": GOOGLE_CLIENT_ID,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GOOGLE_CLIENT_EMAIL.replace('@', '%40')}",
+            "universe_domain": "googleapis.com"
+        }
+        
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info, scopes=SCOPES
         )
         drive = build("drive", "v3", credentials=creds)
         sheets = build("sheets", "v4", credentials=creds)
-        logger.info("Google services initialized successfully")
+        logger.info("Google services initialized successfully from environment variables")
     except Exception as e:
         logger.error(f"Failed to initialize Google services: {e}")
         raise
@@ -572,7 +595,7 @@ async def safe_analyze_receipt_with_openai(img_bytes: bytes) -> Dict[str, Any]:
 - "אחר": כל דבר אחר
 
 דוגמאות:
-- "אולמי דיאמונד" → "אולם וקייטרينג"
+- "אולמי דיאמונד" → "אולם וקייטרינג"
 - "יקב ברקן" → "בר/אלכוהול"
 - "צלם רון" → "צילום"
 - "סופר פארם" → "אחר"
@@ -762,8 +785,7 @@ async def enhanced_health_check():
 @app.get("/debug")
 def debug():
     return {
-        "credentials_file_exists": os.path.exists(GOOGLE_CREDENTIALS_PATH),
-        "credentials_path": GOOGLE_CREDENTIALS_PATH,
+        "google_credentials_env": bool(GOOGLE_PROJECT_ID and GOOGLE_PRIVATE_KEY and GOOGLE_CLIENT_EMAIL),
         "openai_configured": bool(OPENAI_API_KEY),
         "greenapi_configured": bool(GREEN_ID and GREEN_TOKEN),
         "sheets_id": SHEET_ID[:10] + "..." if SHEET_ID else "NOT_SET",
