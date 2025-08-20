@@ -4,7 +4,8 @@ from typing import Optional, Dict, Any, Tuple
 from fastapi import FastAPI, Request, HTTPException
 import httpx
 from dotenv import load_dotenv
-
+from flask import Flask
+    
 # Google APIs
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -18,6 +19,16 @@ load_dotenv()
 
 app = FastAPI()
 
+@app.route("/")
+def home():
+    return {"status": "ok", "message": "האפליקציה שלך עובדת על Cloud Run!"}
+
+# קריטי: להאזין על ה־PORT ש־Cloud Run נותן
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
+    
+    
 # === ENV ===
 PORT = int(os.getenv("PORT", "8080"))
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
