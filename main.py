@@ -98,28 +98,41 @@ def ez_now_iso() -> str:
 def sha256_b64(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
-async def greenapi_download_media(id_message: str) -> Tuple[bytes, str]:
-    url = f"https://api.green-api.com/waInstance{GREEN_ID}/downloadFile/{GREEN_TOKEN}"
-    params = {"idMessage": id_message}
+async def greenapi_download_media(payload: dict) -> Tuple[bytes, str]:
+    """Download media file from GreenAPI using the file URL from payload"""
     
-    print(f"🔽 Downloading media: {url} with idMessage: {id_message}")
+    # חפש את פרטי הקובץ בpayload
+    message_data = payload.get("messageData", {})
     
+    # תמונה
+    if "fileMessageData" in message_data:
+        file_data = message_data["fileMessageData"]
+        download_url = file_data.get("downloadUrl")
+        file_name = file_data.get("fileName", "image.jpg")
+        mime_type = file_data.get("mimeType", "image/jpeg")
+    # או עלולה להיות בformat אחר
+    elif "imageMessage" in message_data:
+        file_data = message_data["imageMessage"]
+        download_url = file_data.get("downloadUrl")
+        file_name = file_data.get("fileName", "image.jpg") 
+        mime_type = file_data.get("mimeType", "image/jpeg")
+    else:
+        raise HTTPException(status_code=400, detail="לא נמצא קישור להורדת הקובץ")
+    
+    if not download_url:
+        raise HTTPException(status_code=400, detail="לא נמצא קישור להורדת הקובץ")
+    
+    print(f"🔽 Downloading from URL: {download_url}")
+    
+    # הורד את הקובץ ישירות מהURL
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.get(url, params=params)
-        print(f"📊 Response status: {r.status_code}")
-        
-        if r.status_code == 404:
-            raise HTTPException(status_code=400, detail="התמונה לא זמינה. נסה לשלוח תמונה חדשה.")
-        
+        r = await client.get(download_url)
         r.raise_for_status()
-        payload = r.json()
-        b64 = payload.get("file")
-        mime = payload.get("mimeType", "image/jpeg")
-        name = payload.get("fileName", "receipt.jpg")
-        if not b64:
-            raise HTTPException(status_code=400, detail="Failed to download file from GreenAPI")
-        blob = base64.b64decode(b64)
-        ext = name.split(".")[-1].lower() if "." in name else ("jpg" if "jpeg" in mime else "png")
+        blob = r.content
+        
+        # זהה סיומת
+        ext = file_name.split(".")[-1].lower() if "." in file_name else ("jpg" if "jpeg" in mime_type else "png")
+        
         return blob, ext
 
 async def greenapi_send_text(chat_id: str, text: str):
@@ -316,7 +329,8 @@ async def webhook(request: Request):
             try:
                 await greenapi_send_text(chat_id, "📷 מעבד את התמונה... אנא המתן")
                 
-                blob, ext = await greenapi_download_media(id_message)
+                # השתמש בpayload כולו במקום id_message
+                blob, ext = await greenapi_download_media(payload)
                 file_hash = sha256_b64(blob)
 
                 ai = await analyze_receipt_with_openai(blob)
