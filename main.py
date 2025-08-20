@@ -35,12 +35,12 @@ def get_google_credentials():
     """Get Google credentials from various possible sources"""
     print("🔍 Looking for Google credentials...")
     
-    # אפשרות 1: קובץ ב-volume mount
-    if os.path.exists("/secrets/gcp-credentials"):
+    # אפשרות 1: קובץ ב-volume mount (הנתיב הנכון מהVolume Mount)
+    if os.path.exists("/secrets/gcp-credentials") and os.path.isfile("/secrets/gcp-credentials"):
         print("✅ Found credentials at /secrets/gcp-credentials")
         return "/secrets/gcp-credentials"
         
-    if os.path.exists("/secrets/gcp_credentials.json"):
+    if os.path.exists("/secrets/gcp_credentials.json") and os.path.isfile("/secrets/gcp_credentials.json"):
         print("✅ Found credentials at /secrets/gcp_credentials.json")
         return "/secrets/gcp_credentials.json"
     
