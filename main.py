@@ -202,19 +202,26 @@ def sheets_append_row(row_values: list):
 
 def build_summary_msg(data: dict) -> str:
     vendor = data.get('vendor', 'לא זוהה')
-    amount = data.get('amount', 'לא זוהה')
+    amount = data.get('amount', 'לא זוהה') 
     currency = data.get('currency', 'ILS')
     category = data.get('category', 'אחר')
     date = data.get('date', 'לא זוהה')
+    payment_method = data.get('payment_method', '')
+    invoice_number = data.get('invoice_number', '')
     
     msg = f"""✅ קבלה נשמרה!
 
 🏪 ספק: {vendor}
 💰 סכום: {amount} {currency}
 📅 תאריך: {date}
-🏷️ קטגוריה: {category}
-
-📝 לעריכה: שלח הודעה עם הערך החדש"""
+🏷️ קטגוריה: {category}"""
+    
+    if payment_method:
+        payment_emoji = "💳" if payment_method == "card" else "💵" if payment_method == "cash" else "🏦"
+        msg += f"\n{payment_emoji} תשלום: {payment_method}"
+    
+    if invoice_number:
+        msg += f"\n📋 מספר חשבונית: {invoice_number}"
     
     return msg
 
@@ -235,7 +242,12 @@ async def analyze_receipt_with_openai(img_bytes: bytes) -> Dict[str, Any]:
         "\"category\": one of [\"אולם וקייטרינג\",\"בר/אלכוהול\",\"צילום\",\"מוזיקה/דיג'יי\","
         "\"בגדים/טבעות\",\"עיצוב/פרחים\",\"הדפסות/הזמנות/מדיה\",\"לינה/נסיעות/הסעות\",\"אחר\"], "
         "\"payment_method\": \"card\" | \"cash\" | \"bank\" | null, "
-        "\"invoice_number\": string | null, \"notes\": string | null }"
+        "\"invoice_number\": string | null, \"notes\": string | null }\n\n"
+        "חוקי זיהוי קטגוריות:\n"
+        "- אולמות, גנים, קייטרינג, מקומות אירועים = 'אולם וקייטרינג'\n"
+        "- דיג'יי, DJ, BPM, תקליטן, מוזיקה, להקה, זמר = 'מוזיקה/דיג'יי'\n"
+        "- צלם, וידאו, קליפ, עריכה = 'צילום'\n"
+        "- פרחים, עיצוב, דקורציה = 'עיצוב/פרחים'"
     )
     user_prompt = "נתח את התמונה והחזר JSON בלבד לפי הסכמה. אין להוסיף הסברים."
     
@@ -337,12 +349,64 @@ async def webhook(request: Request):
                 ai = await analyze_receipt_with_openai(blob)
                 print(f"✅ OpenAI analysis: {ai}")
                 
+                # צור מזהה ייחודי לקבלה
+                file_hash = sha256_b64(blob)
+                expense_id = hashlib.md5((file_hash + phone).encode()).hexdigest()
+                now_iso = ez_now_iso()
+                
+                # קבל את הURL המקורי מהpayload
+                original_url = ""
+                try:
+                    message_data = payload.get("messageData", {})
+                    if "fileMessageData" in message_data:
+                        original_url = message_data["fileMessageData"].get("downloadUrl", "")
+                    elif "imageMessage" in message_data:
+                        original_url = message_data["imageMessage"].get("downloadUrl", "")
+                except:
+                    original_url = "URL לא זמין"
+                
+                # בנה את השורה לגיליון
+                row_map = {
+                    "expense_id": expense_id,
+                    "owner_phone": phone,
+                    "partner_group_id": "",  # ריק לעכשיו
+                    "date": ai.get("date") or "",
+                    "amount": ai.get("amount") or "",
+                    "currency": ai.get("currency") or DEFAULT_CURRENCY,
+                    "vendor": ai.get("vendor") or "",
+                    "category": ai.get("category") or "אחר",
+                    "payment_method": ai.get("payment_method") or "",
+                    "invoice_number": ai.get("invoice_number") or "",
+                    "notes": ai.get("notes") or "",
+                    "drive_file_url": original_url,
+                    "source": "whatsapp",
+                    "status": "received",
+                    "needs_review": "לא" if ai.get("amount") and ai.get("vendor") else "כן",
+                    "created_at": now_iso,
+                    "updated_at": now_iso,
+                    "approved_at": "",
+                }
+                
+                print(f"📝 Saving to sheets: {row_map}")
+                
+                # שמור בגיליון
+                try:
+                    row_values = [row_map.get(h, "") for h in SHEET_HEADERS]
+                    sheets_append_row(row_values)
+                    print("✅ Saved to Google Sheets successfully")
+                except Exception as e:
+                    print(f"❌ Error saving to sheets: {e}")
+                    # המשך גם אם השמירה נכשלה
+                
                 # בנה סיכום למשתמש
                 msg = build_summary_msg(ai)
+                msg += f"\n\n🆔 מזהה קבלה: {expense_id[:8]}..."
+                msg += f"\n📋 נשמר בגיליון בהצלחה!"
+                
                 await greenapi_send_text(chat_id, msg)
                 
                 print("✅ Summary sent to user")
-                return {"status": "receipt_analyzed", "analysis": ai}
+                return {"status": "receipt_saved", "expense_id": expense_id, "analysis": ai}
 
             except Exception as e:
                 print(f"❌ Error processing image: {str(e)}")
