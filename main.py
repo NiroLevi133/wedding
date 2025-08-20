@@ -329,57 +329,23 @@ async def webhook(request: Request):
             try:
                 await greenapi_send_text(chat_id, "📷 מעבד את התמונה... אנא המתן")
                 
-                # השתמש בpayload כולו במקום id_message
+                # הורד את התמונה
                 blob, ext = await greenapi_download_media(payload)
-                file_hash = sha256_b64(blob)
-
+                print(f"✅ Downloaded image, size: {len(blob)} bytes")
+                
+                # נתח עם OpenAI
                 ai = await analyze_receipt_with_openai(blob)
-
-                today = dt.datetime.now()
-                y = str(today.year)
-                m = f"{today.month:02d}"
+                print(f"✅ OpenAI analysis: {ai}")
                 
-                folder_phone = ensure_folder(phone, DRIVE_ROOT)
-                folder_year = ensure_folder(y, folder_phone)
-                folder_month = ensure_folder(m, folder_year)
-
-                safe_vendor = re.sub(r'[^\w\u0590-\u05FF]+', '_', str(ai.get('vendor') or 'vendor'))
-                fname = f"{today.strftime('%Y%m%d')}_{(ai.get('amount') or 'xxx')}_{safe_vendor}_{file_hash[:8]}.{ext}"
-                
-                file_id, file_url = upload_to_drive(blob, fname, folder_month)
-
-                expense_id = hashlib.md5((file_hash + phone).encode()).hexdigest()
-                now_iso = ez_now_iso()
-                row_map = {
-                    "expense_id": expense_id,
-                    "owner_phone": phone,
-                    "partner_group_id": "",
-                    "date": ai.get("date") or "",
-                    "amount": ai.get("amount") or "",
-                    "currency": ai.get("currency") or DEFAULT_CURRENCY,
-                    "vendor": ai.get("vendor") or "",
-                    "category": ai.get("category") or "אחר",
-                    "payment_method": ai.get("payment_method") or "",
-                    "invoice_number": ai.get("invoice_number") or "",
-                    "notes": ai.get("notes") or "",
-                    "drive_file_url": file_url,
-                    "source": "whatsapp",
-                    "status": "received",
-                    "needs_review": "",
-                    "created_at": now_iso,
-                    "updated_at": now_iso,
-                    "approved_at": "",
-                }
-
-                row_values = [row_map.get(h, "") for h in SHEET_HEADERS]
-                sheets_append_row(row_values)
-
-                msg = build_summary_msg(row_map)
+                # בנה סיכום למשתמש
+                msg = build_summary_msg(ai)
                 await greenapi_send_text(chat_id, msg)
-
-                return {"status": "receipt_saved", "expense_id": expense_id, "file_url": file_url}
+                
+                print("✅ Summary sent to user")
+                return {"status": "receipt_analyzed", "analysis": ai}
 
             except Exception as e:
+                print(f"❌ Error processing image: {str(e)}")
                 await greenapi_send_text(chat_id, f"❌ שגיאה בעיבוד התמונה: {str(e)}")
                 raise
         else:
