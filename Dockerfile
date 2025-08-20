@@ -2,16 +2,19 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps for google client
+# התקנות מערכתיות ללקוח גוגל
 RUN apt-get update && apt-get install -y build-essential libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# התקנת חבילות פייתון
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app (כל התוכן של התיקייה שלך)
-COPY . .
+# העתקת קוד האפליקציה
+COPY app ./app
 
+# קובעים שהלוגים לא ישמרו בבאפר
 ENV PYTHONUNBUFFERED=1
 
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# ברירת מחדל – Cloud Run מאזין בפורט 8080
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
