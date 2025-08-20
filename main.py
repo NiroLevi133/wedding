@@ -30,8 +30,39 @@ DRIVE_ROOT = os.getenv("GDRIVE_ROOT_FOLDER_ID")
 DEFAULT_CURRENCY = os.getenv("DEFAULT_CURRENCY", "ILS")
 DEFAULT_TZ = os.getenv("DEFAULT_TIMEZONE", "Asia/Jerusalem")
 
-# Service account path (Cloud Run injects this when mounting secret)
-GOOGLE_CREDENTIALS_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "/secrets/gcp_credentials.json")
+# Service account path with fallback options
+def get_google_credentials():
+    """Get Google credentials from various possible sources"""
+    
+    # אפשרות 1: משתנה סביבה מ-Secret Manager
+    creds_content = os.getenv("secret")
+    if creds_content:
+        import tempfile
+        import json
+        
+        # כתוב לקובץ זמני
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            if creds_content.startswith('{'):
+                f.write(creds_content)
+            else:
+                import base64
+                decoded = base64.b64decode(creds_content).decode('utf-8')
+                f.write(decoded)
+            temp_path = f.name
+        return temp_path
+    
+    # אפשרות 2: קובץ ב-volume mount
+    if os.path.exists("/secrets/gcp_credentials.json"):
+        return "/secrets/gcp_credentials.json"
+    
+    # אפשרות 3: קובץ ב-working directory
+    if os.path.exists("./gcp_credentials.json"):
+        return "./gcp_credentials.json"
+    
+    # אפשרות 4: משתנה סביבה רגיל
+    return os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "gcp_credentials.json")
+
+GOOGLE_CREDENTIALS_PATH = get_google_credentials()
 
 ALLOWED_PHONES = set(p.strip() for p in (os.getenv("ALLOWED_PHONES","").split(",") if os.getenv("ALLOWED_PHONES") else []))
 
@@ -403,6 +434,9 @@ async def analyze_receipt_with_openai(img_bytes: bytes) -> Dict[str, Any]:
 # ========== Webhook ==========
 @app.post("/webhook")
 async def webhook(request: Request):
+    print("🔥 WEBHOOK CALLED!")
+    print(f"⏰ Time: {dt.datetime.now()}")
+    
     try:
         # בדיקת אימות
         if WEBHOOK_SHARED_SECRET:
@@ -411,7 +445,10 @@ async def webhook(request: Request):
                 raise HTTPException(status_code=401, detail="Unauthorized")
 
         payload = await request.json()
+        print(f"📦 Payload received: {json.dumps(payload, indent=2, ensure_ascii=False)}")
+        
         ensure_google()
+        print("✅ Google APIs initialized successfully")
 
         # וודא שיש headers בגיליון
         create_initial_sheet_headers()
@@ -578,13 +615,12 @@ async def webhook(request: Request):
         # סוגי הודעות אחרים
         return {"status": "ignored", "message_type": type_msg}
         
-    except HTTPException:
-        # HTTPException כבר נזרק, אל תעטוף אותו שוב
-        raise
     except Exception as e:
         # לוג את השגיאה
-        print(f"Error in webhook: {str(e)}")
+        print(f"💥 ERROR in webhook: {str(e)}")
+        print(f"📄 Error type: {type(e).__name__}")
         import traceback
+        print(f"🔍 Full traceback:")
         traceback.print_exc()
         
         # נסה לשלוח הודעת שגיאה למשתמש
