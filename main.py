@@ -113,8 +113,11 @@ def get_google_credentials():
     
     return None
 
-# אל תגדיר GOOGLE_CREDENTIALS_PATH כאן - זה יקרא בזמן הטעינה
+# אל תקרא לפונקציה בזמן הטעינה - זה יגרום לקריסה אם אין credentials
 # GOOGLE_CREDENTIALS_PATH = get_google_credentials()
+
+# במקום זה, פשוט הגדר None ותן לפונקציה ensure_google לטפל בזה
+GOOGLE_CREDENTIALS_PATH = None
 
 ALLOWED_PHONES = set(p.strip() for p in (os.getenv("ALLOWED_PHONES","").split(",") if os.getenv("ALLOWED_PHONES") else []))
 
@@ -142,7 +145,7 @@ SHEET_HEADERS = [
 
 @app.get("/")
 def home():
-    return {"status": "ok", "message": "מערכת ניהול הוצאות חתונה פעילה! 💒✨"}
+    return {"status": "ok", "message": "מערכת ניהול הוצאות חתונה פעילה! 💒✨", "startup": "success"}
 
 @app.get("/health")
 def health():
@@ -157,20 +160,24 @@ def ensure_google():
         return
         
     print("🔍 Getting Google credentials...")
-    credentials_path = get_google_credentials()
-    if not credentials_path:
-        raise RuntimeError("Google credentials not found in any location!")
-        
-    if not os.path.exists(credentials_path):
-        raise RuntimeError(f"Google credentials file not found at {credentials_path}")
-        
-    print(f"🔑 Using credentials from: {credentials_path}")
-    creds = service_account.Credentials.from_service_account_file(
-        credentials_path, scopes=SCOPES
-    )
-    drive = build("drive", "v3", credentials=creds)
-    sheets = build("sheets", "v4", credentials=creds)
-    print("✅ Google APIs initialized successfully")
+    try:
+        credentials_path = get_google_credentials()
+        if not credentials_path:
+            raise RuntimeError("Google credentials not found in any location!")
+            
+        if not os.path.exists(credentials_path):
+            raise RuntimeError(f"Google credentials file not found at {credentials_path}")
+            
+        print(f"🔑 Using credentials from: {credentials_path}")
+        creds = service_account.Credentials.from_service_account_file(
+            credentials_path, scopes=SCOPES
+        )
+        drive = build("drive", "v3", credentials=creds)
+        sheets = build("sheets", "v4", credentials=creds)
+        print("✅ Google APIs initialized successfully")
+    except Exception as e:
+        print(f"❌ Failed to initialize Google APIs: {e}")
+        raise
 
 # ========== Utilities ==========
 def chatid_to_e164(chat_id: str) -> str:
