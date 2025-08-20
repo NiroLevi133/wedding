@@ -339,8 +339,6 @@ async def webhook(request: Request):
         elif type_msg == "imageMessage":
             print("✅ Processing IMAGE message")
             try:
-                await greenapi_send_text(chat_id, "📷 מעבד את התמונה... אנא המתן")
-                
                 # הורד את התמונה
                 blob, ext = await greenapi_download_media(payload)
                 print(f"✅ Downloaded image, size: {len(blob)} bytes")
@@ -354,22 +352,39 @@ async def webhook(request: Request):
                 expense_id = hashlib.md5((file_hash + phone).encode()).hexdigest()
                 now_iso = ez_now_iso()
                 
-                # קבל את הURL המקורי מהpayload
-                original_url = ""
+                # צור תיקיה בדרייב ושמור את הקובץ
                 try:
-                    message_data = payload.get("messageData", {})
-                    if "fileMessageData" in message_data:
-                        original_url = message_data["fileMessageData"].get("downloadUrl", "")
-                    elif "imageMessage" in message_data:
-                        original_url = message_data["imageMessage"].get("downloadUrl", "")
-                except:
-                    original_url = "URL לא זמין"
+                    today = dt.datetime.now()
+                    
+                    # צור תיקיה לפי מספר טלפון
+                    phone_folder = ensure_folder(phone, DRIVE_ROOT)
+                    
+                    # שם קובץ עם פרטי הקבלה
+                    safe_vendor = re.sub(r'[^\w\u0590-\u05FF]+', '_', str(ai.get('vendor') or 'vendor'))
+                    filename = f"{today.strftime('%Y%m%d')}_{(ai.get('amount') or 'unknown')}_{safe_vendor}_{file_hash[:8]}.{ext}"
+                    
+                    # העלה לדרייב
+                    file_id, drive_url = upload_to_drive(blob, filename, phone_folder)
+                    print(f"✅ Uploaded to Drive: {drive_url}")
+                    
+                except Exception as drive_error:
+                    print(f"❌ Drive upload failed: {drive_error}")
+                    # אם דרייב נכשל, השתמש בURL המקורי
+                    drive_url = ""
+                    try:
+                        message_data = payload.get("messageData", {})
+                        if "fileMessageData" in message_data:
+                            drive_url = message_data["fileMessageData"].get("downloadUrl", "")
+                        elif "imageMessage" in message_data:
+                            drive_url = message_data["imageMessage"].get("downloadUrl", "")
+                    except:
+                        drive_url = "URL לא זמין"
                 
                 # בנה את השורה לגיליון
                 row_map = {
                     "expense_id": expense_id,
                     "owner_phone": phone,
-                    "partner_group_id": "",  # ריק לעכשיו
+                    "partner_group_id": "",
                     "date": ai.get("date") or "",
                     "amount": ai.get("amount") or "",
                     "currency": ai.get("currency") or DEFAULT_CURRENCY,
@@ -378,7 +393,7 @@ async def webhook(request: Request):
                     "payment_method": ai.get("payment_method") or "",
                     "invoice_number": ai.get("invoice_number") or "",
                     "notes": ai.get("notes") or "",
-                    "drive_file_url": original_url,
+                    "drive_file_url": drive_url,
                     "source": "whatsapp",
                     "status": "received",
                     "needs_review": "לא" if ai.get("amount") and ai.get("vendor") else "כן",
@@ -396,12 +411,9 @@ async def webhook(request: Request):
                     print("✅ Saved to Google Sheets successfully")
                 except Exception as e:
                     print(f"❌ Error saving to sheets: {e}")
-                    # המשך גם אם השמירה נכשלה
                 
-                # בנה סיכום למשתמש
+                # בנה סיכום למשתמש (ללא השורות שרצית להסיר)
                 msg = build_summary_msg(ai)
-                msg += f"\n\n🆔 מזהה קבלה: {expense_id[:8]}..."
-                msg += f"\n📋 נשמר בגיליון בהצלחה!"
                 
                 await greenapi_send_text(chat_id, msg)
                 
@@ -410,7 +422,7 @@ async def webhook(request: Request):
 
             except Exception as e:
                 print(f"❌ Error processing image: {str(e)}")
-                await greenapi_send_text(chat_id, f"❌ שגיאה בעיבוד התמונה: {str(e)}")
+                await greenapi_send_text(chat_id, f"❌ שגיאה: {str(e)}")
                 raise
         else:
             print(f"❓ Unknown message type: {type_msg}")
