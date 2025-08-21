@@ -299,10 +299,11 @@ def safe_upload_to_storage(blob_data: bytes, filename: str, phone: str) -> Tuple
         
         blob = bucket.blob(blob_path)
         
-        # העלאה עם metadata
+        # העלאה עם metadata שימושי
         content_type = 'image/jpeg' if filename.lower().endswith(('.jpg', '.jpeg')) else 'image/png'
         blob.content_type = content_type
         
+        # הוסף metadata לחיפוש
         blob.metadata = {
             'uploaded_by': phone,
             'upload_date': dt.datetime.now().isoformat(),
@@ -317,16 +318,12 @@ def safe_upload_to_storage(blob_data: bytes, filename: str, phone: str) -> Tuple
             timeout=60
         )
         
-        # יצירת signed URL לאבטחה (תוקף 30 יום)
-        from datetime import timedelta
-        signed_url = blob.generate_signed_url(
-            version="v4",
-            expiration=timedelta(days=30),
-            method="GET"
-        )
+        # קבלת URL ציבורי קבוע
+        blob.make_public()
+        file_url = blob.public_url
         
         logger.info(f"File uploaded successfully: {blob_path}")
-        return blob_path, signed_url
+        return blob_path, file_url
         
     except Exception as e:
         logger.error(f"Cloud Storage upload failed: {e}")
