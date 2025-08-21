@@ -457,111 +457,104 @@ LOGIN_PAGE = """
 </html>
 """
 
+
+def normalize_phone_number(phone: str) -> str:
+    """פונקציה אחידה לנרמול מספרי טלפון"""
+    if not phone:
+        return ""
+    
+    phone = phone.strip().replace("-", "").replace(" ", "")
+    
+    if phone.startswith('05'):
+        return '+972' + phone[1:]
+    elif phone.startswith('5') and len(phone) == 9:
+        return '+972' + phone
+    elif not phone.startswith('+'):
+        if phone.startswith('972'):
+            return '+' + phone
+        elif len(phone) == 10 and phone.startswith('0'):
+            return '+972' + phone[1:]
+    
+    return phone
+
 def setup_auth_routes(app, auth_manager, GREEN_ID, GREEN_TOKEN):
     """מוסיף את נתיבי האימות לאפליקציה"""
-    
+
     @app.get("/login", response_class=HTMLResponse)
     async def login_page():
         """דף הכניסה"""
         return LOGIN_PAGE
-    
+
     @app.post("/auth/send-code")
     async def send_verification_code(request: Request):
-        """שולח קוד אימות בווטסאפ"""
+        """שולח קוד אימות בווטסאפ - עם נרמול אחיד"""
         try:
             data = await request.json()
             phone = data.get('phone', '').strip()
-            
-            # המרת מספר ישראלי רגיל לפורמט בינלאומי
-            if phone.startswith('05'):
-                phone = '+972' + phone[1:]
-            elif phone.startswith('5') and len(phone) == 9:
-                phone = '+972' + phone
-            elif not phone.startswith('+'):
-                if phone.startswith('972'):
-                    phone = '+' + phone
-                else:
-                    # ניחוש - אם זה מספר של 10 ספרות שמתחיל ב-0
-                    if len(phone) == 10 and phone.startswith('0'):
-                        phone = '+972' + phone[1:]
-            
+
+            # ✅ נרמול מספר
+            normalized_phone = normalize_phone_number(phone)
+
             # ולידציה
-            if not re.match(r'^\+972[0-9]{9}$', phone):
-                return JSONResponse({
-                    "success": False,
-                    "message": "מספר טלפון לא תקין. הזן מספר ישראלי (למשל: 0501234567)"
-                })
-            
-            # צור קוד
-            success, message, code = auth_manager.create_verification_code(phone)
-            
+            if not re.match(r'^\+972[0-9]{9}$', normalized_phone):
+                return JSONResponse(
+                    {"success": False, "message": "מספר טלפון לא תקין. הזן מספר ישראלי (למשל: 0501234567)"},
+                    status_code=400
+                )
+
+            # 🔑 יצירת קוד אימות ושמירה
+            success, message, code = auth_manager.create_verification_code(normalized_phone)
             if not success:
-                return JSONResponse({
-                    "success": False,
-                    "message": message
-                })
-            
-            # שלח בווטסאפ
+                return JSONResponse({"success": False, "message": message}, status_code=400)
+
+            # שליחה בווטסאפ
             if GREEN_ID and GREEN_TOKEN:
                 try:
-                    chat_id = phone.replace('+', '') + '@c.us'
+                    chat_id = normalized_phone.replace('+', '') + '@c.us'
                     url = f"https://api.green-api.com/waInstance{GREEN_ID}/sendMessage/{GREEN_TOKEN}"
-                    
+
                     whatsapp_message = f"""🔐 *קוד אימות למערכת הוצאות החתונה*
 
 הקוד שלך: *{code}*
 
 הקוד תקף ל-10 דקות.
 אל תשתף קוד זה עם אף אחד."""
-                    
+
                     async with httpx.AsyncClient(timeout=30) as client:
                         response = await client.post(url, json={
                             "chatId": chat_id,
                             "message": whatsapp_message
                         })
                         response.raise_for_status()
-                    
-                    logger.info(f"Verification code sent to {phone}: {code}")
-                    
-                    return JSONResponse({
-                        "success": True,
-                        "message": "קוד נשלח בווטסאפ"
-                    })
-                    
+
+                    logger.info(f"Verification code sent to {normalized_phone}: {code}")
+                    return JSONResponse({"success": True, "message": "קוד נשלח בווטסאפ"})
                 except Exception as e:
                     logger.error(f"Failed to send WhatsApp message: {e}")
-                    return JSONResponse({
-                        "success": False,
-                        "message": "שגיאה בשליחת הודעת ווטסאפ"
-                    })
+                    return JSONResponse({"success": False, "message": "שגיאה בשליחת הודעת ווטסאפ"}, status_code=502)
             else:
-                # מצב פיתוח - הצג בלוג
-                logger.info(f"DEV MODE - Verification code for {phone}: {code}")
-                return JSONResponse({
-                    "success": True,
-                    "message": f"קוד לפיתוח: {code}"
-                })
-                
+                # מצב פיתוח
+                logger.info(f"DEV MODE - Verification code for {normalized_phone}: {code}")
+                return JSONResponse({"success": True, "message": f"קוד לפיתוח: {code}"})
+
         except Exception as e:
             logger.error(f"Error in send_verification_code: {e}")
-            return JSONResponse({
-                "success": False,
-                "message": "שגיאה בשרת"
-            })
-    
+            return JSONResponse({"success": False, "message": "שגיאה בשרת"}, status_code=500)
+
     @app.post("/auth/verify-code")
     async def verify_code(request: Request, response: Response):
         """מאמת קוד שהוזן"""
         try:
             data = await request.json()
             phone = data.get('phone', '').strip()
+            normalized_phone = normalize_phone_number(phone)
             code = data.get('code', '').strip()
-            
-            # אמת קוד
-            success, message, session_token = auth_manager.verify_code(phone, code)
-            
+
+            # אמת קוד (שימוש במספר המנורמל!)
+            success, message, session_token = auth_manager.verify_code(normalized_phone, code)
+
             if success:
-                # הצב cookie
+                # הצבת cookie
                 response.set_cookie(
                     key="session_token",
                     value=session_token,
@@ -570,23 +563,14 @@ def setup_auth_routes(app, auth_manager, GREEN_ID, GREEN_TOKEN):
                     secure=True,
                     samesite="lax"
                 )
-                
-                return JSONResponse({
-                    "success": True,
-                    "message": "אימות הצליח"
-                })
+                return JSONResponse({"success": True, "message": "אימות הצליח"})
             else:
-                return JSONResponse({
-                    "success": False,
-                    "message": message
-                })
-                
+                return JSONResponse({"success": False, "message": message}, status_code=400)
+
         except Exception as e:
             logger.error(f"Error in verify_code: {e}")
-            return JSONResponse({
-                "success": False,
-                "message": "שגיאה בשרת"
-            })
+            return JSONResponse({"success": False, "message": "שגיאה בשרת"}, status_code=500)
+
     
     @app.post("/auth/logout")
     async def logout(request: Request, response: Response):
