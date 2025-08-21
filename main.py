@@ -79,7 +79,7 @@ HELP_MSG = """🤖 **מערכת ניהול הוצאות חתונה**
 • `עזרה` → הודעה זו
 
 💡 **טיפים:**
-• ....תמונות ברורות נותנות תוצאות טובות יותר
+• תמונות ברורות נותנות תוצאות טובות יותר
 • בדוק שהסכום והספק נכונים בגיליון
 • שני בני הזוג יכולים לשלוח קבלות לאותה קבוצה
 
@@ -97,7 +97,10 @@ def ensure_google():
             raise RuntimeError("Missing required Google credentials environment variables")
         
         # ✅ תיקון הפרטי קי - החלפת \\n ב-\n אמיתיים
-        private_key = GOOGLE_PRIVATE_KEY.replace('\\n', '\n')
+        private_key = GOOGLE_PRIVATE_KEY.replace('\\n', '\n').replace('\n\n', '\n')
+        if not private_key.startswith('-----BEGIN'):
+            # אם זה לא מתחיל נכון, נסה להוסיף את הכותרות
+            private_key = f"-----BEGIN PRIVATE KEY-----\n{private_key}\n-----END PRIVATE KEY-----"
         
         creds_info = {
             "type": "service_account",
@@ -1281,5 +1284,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8080))
     logger.info(f"Starting server on port {port}")
-
     uvicorn.run(app, host="0.0.0.0", port=port)
