@@ -816,22 +816,53 @@ def clean_receipt_data(data: dict) -> dict:
    return data
 
 # ===== FastAPI endpoints =====
-@app.get("/")
+
 @app.get("/", response_class=HTMLResponse)
 def dashboard_redirect():
     return """
     <html>
         <head>
-            <meta http-equiv="refresh" content="0; url=http://localhost:8501">
+            <meta http-equiv="refresh" content="0; url=/dashboard">
             <title>מערכת ניהול הוצאות חתונה</title>
         </head>
         <body>
             <h1>מפנה לדשבורד...</h1>
-            <p>אם לא מועבר אוטומטית, <a href="http://localhost:8501">לחץ כאן</a></p>
+            <p>אם לא מועבר אוטומטית, <a href="/dashboard">לחץ כאן</a></p>
         </body>
     </html>
     """
 
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard():
+    return """
+    <!DOCTYPE html>
+    <html dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>דשבורד הוצאות חתונה</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; direction: rtl; }
+            .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
+            .header { text-align: center; color: #333; margin-bottom: 30px; }
+            .coming-soon { text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px; margin: 20px 0; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>💒 דשבורד הוצאות החתונה</h1>
+                <p>ברוכים הבאים למערכת ניהול ההוצאות שלכם</p>
+            </div>
+            <div class="coming-soon">
+                <h2>🚧 בקרוב!</h2>
+                <p>הדשבורד בפיתוח ויהיה זמין בקרוב</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+    
+    
 @app.get("/health")
 async def enhanced_health_check():
     """בדיקת תקינות משופרת"""
