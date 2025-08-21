@@ -225,8 +225,10 @@ def get_storage_client():
         if google_creds_json:
             creds_dict = json.loads(google_creds_json)
             credentials = service_account.Credentials.from_service_account_info(creds_dict)
+            # ✅ קח את project_id מתוך ה-JSON
+            project_id = creds_dict.get("project_id")
         else:
-            # השתמש באותם credentials כמו Sheets עם תיקון פרטי קי
+            # fallback למשתני סביבה נפרדים
             private_key = GOOGLE_PRIVATE_KEY
             if private_key and '\\n' in private_key:
                 private_key = private_key.replace('\\n', '\n')
@@ -244,8 +246,10 @@ def get_storage_client():
                 "universe_domain": "googleapis.com"
             }
             credentials = service_account.Credentials.from_service_account_info(credentials_dict)
+            project_id = GOOGLE_PROJECT_ID
         
-        client = storage.Client(credentials=credentials, project=GOOGLE_PROJECT_ID)
+        # ✅ השתמש ב-project_id שחולץ מה-JSON
+        client = storage.Client(credentials=credentials, project=project_id)
         return client
     except Exception as e:
         logger.error(f"Failed to create storage client: {e}")
@@ -259,49 +263,46 @@ def safe_upload_to_storage(blob_data: bytes, filename: str, phone: str) -> Tuple
         if not client:
             return "", "לא הצליח להתחבר ל-Cloud Storage - בדוק הרשאות"
         
+        # ✅ קח את project_id מה-JSON
+        google_creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+        if google_creds_json:
+            creds_dict = json.loads(google_creds_json)
+            project_id = creds_dict.get("project_id")
+        else:
+            project_id = GOOGLE_PROJECT_ID
+        
         # שם bucket מאורגן לייצור
-        bucket_name = f"{GOOGLE_PROJECT_ID}-wedding-receipts"
+        bucket_name = f"{project_id}-wedding-receipts"
         
         try:
             # נסה לקבל bucket קיים או ליצור חדש
             bucket = client.bucket(bucket_name)
             if not bucket.exists():
-                # יצירת bucket עם הגדרות אופטימליות לייצור
                 bucket = client.create_bucket(
                     bucket_name, 
-                    location="us-central1",  # זול יותר
-                    predefined_acl='private',  # אבטחה
+                    location="us-central1",
+                    predefined_acl='private',
                     predefined_default_object_acl='private'
                 )
-                
-                # הגדרות lifecycle - מחיקה אוטומטית אחרי שנה
-                lifecycle_rule = {
-                    'action': {'type': 'Delete'},
-                    'condition': {'age': 365}  # ימים
-                }
-                bucket.lifecycle_rules = [lifecycle_rule]
-                bucket.patch()
-                
                 logger.info(f"Created production bucket: {bucket_name}")
         except Exception as bucket_error:
             # fallback - אם יצירת bucket נכשלה
             logger.warning(f"Bucket creation failed: {bucket_error}")
             # נסה bucket ברירת מחדל
-            bucket_name = f"{GOOGLE_PROJECT_ID}.appspot.com"
+            bucket_name = f"{project_id}.appspot.com"
             bucket = client.bucket(bucket_name)
         
-        # ארגון קבצים לפי תאריך וטלפון - קל לניהול
+        # ארגון קבצים לפי תאריך וטלפון
         today = dt.datetime.now()
         phone_clean = phone.replace('+', '').replace('-', '')
         blob_path = f"{today.year}/{today.month:02d}/{phone_clean}/{filename}"
         
         blob = bucket.blob(blob_path)
         
-        # העלאה עם metadata שימושי
+        # העלאה עם metadata
         content_type = 'image/jpeg' if filename.lower().endswith(('.jpg', '.jpeg')) else 'image/png'
         blob.content_type = content_type
         
-        # הוסף metadata לחיפוש
         blob.metadata = {
             'uploaded_by': phone,
             'upload_date': dt.datetime.now().isoformat(),
@@ -313,7 +314,7 @@ def safe_upload_to_storage(blob_data: bytes, filename: str, phone: str) -> Tuple
         blob.upload_from_string(
             blob_data, 
             content_type=content_type,
-            timeout=60  # timeout מפורש
+            timeout=60
         )
         
         # יצירת signed URL לאבטחה (תוקף 30 יום)
@@ -330,7 +331,6 @@ def safe_upload_to_storage(blob_data: bytes, filename: str, phone: str) -> Tuple
     except Exception as e:
         logger.error(f"Cloud Storage upload failed: {e}")
         
-        # Fallback graceful - שמור לפחות את הנתונים
         if "permission" in str(e).lower() or "forbidden" in str(e).lower():
             return "", f"שגיאת הרשאות Cloud Storage: {str(e)[:100]}"
         else:
