@@ -219,70 +219,122 @@ async def greenapi_download_media(payload: dict) -> Tuple[bytes, str]:
         raise
 
 def get_storage_client():
-    """יצירת client ל-Cloud Storage"""
+    """יצירת client ל-Cloud Storage עם error handling מתקדם"""
     try:
-        # השתמש באותם credentials כמו Google Sheets
-        credentials_dict = {
-            "type": "service_account",
-            "project_id": GOOGLE_PROJECT_ID,
-            "private_key_id": GOOGLE_PRIVATE_KEY_ID or "",
-            "private_key": GOOGLE_PRIVATE_KEY,
-            "client_email": GOOGLE_CLIENT_EMAIL,
-            "client_id": GOOGLE_CLIENT_ID or "",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "universe_domain": "googleapis.com"
-        }
+        google_creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+        if google_creds_json:
+            creds_dict = json.loads(google_creds_json)
+            credentials = service_account.Credentials.from_service_account_info(creds_dict)
+        else:
+            # השתמש באותם credentials כמו Sheets עם תיקון פרטי קי
+            private_key = GOOGLE_PRIVATE_KEY
+            if private_key and '\\n' in private_key:
+                private_key = private_key.replace('\\n', '\n')
+            
+            credentials_dict = {
+                "type": "service_account",
+                "project_id": GOOGLE_PROJECT_ID,
+                "private_key_id": GOOGLE_PRIVATE_KEY_ID or "",
+                "private_key": private_key,
+                "client_email": GOOGLE_CLIENT_EMAIL,
+                "client_id": GOOGLE_CLIENT_ID or "",
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "universe_domain": "googleapis.com"
+            }
+            credentials = service_account.Credentials.from_service_account_info(credentials_dict)
         
-        from google.oauth2 import service_account
-        credentials = service_account.Credentials.from_service_account_info(credentials_dict)
         client = storage.Client(credentials=credentials, project=GOOGLE_PROJECT_ID)
         return client
     except Exception as e:
         logger.error(f"Failed to create storage client: {e}")
         return None
 
+
 def safe_upload_to_storage(blob_data: bytes, filename: str, phone: str) -> Tuple[str, str]:
-    """העלאה ל-Cloud Storage"""
+    """העלאה מתקדמת ל-Cloud Storage עם resilience"""
     try:
         client = get_storage_client()
         if not client:
-            return "", "לא הצליח להתחבר ל-Cloud Storage"
+            return "", "לא הצליח להתחבר ל-Cloud Storage - בדוק הרשאות"
         
-        # שם ה-bucket (נשתמש בשם הפרויקט)
-        bucket_name = f"{GOOGLE_PROJECT_ID}-receipts"
+        # שם bucket מאורגן לייצור
+        bucket_name = f"{GOOGLE_PROJECT_ID}-wedding-receipts"
         
         try:
-            # נסה לקבל את ה-bucket או ליצור אותו
+            # נסה לקבל bucket קיים או ליצור חדש
             bucket = client.bucket(bucket_name)
             if not bucket.exists():
-                bucket = client.create_bucket(bucket_name, location="us-central1")
-                logger.info(f"Created new bucket: {bucket_name}")
+                # יצירת bucket עם הגדרות אופטימליות לייצור
+                bucket = client.create_bucket(
+                    bucket_name, 
+                    location="us-central1",  # זול יותר
+                    predefined_acl='private',  # אבטחה
+                    predefined_default_object_acl='private'
+                )
+                
+                # הגדרות lifecycle - מחיקה אוטומטית אחרי שנה
+                lifecycle_rule = {
+                    'action': {'type': 'Delete'},
+                    'condition': {'age': 365}  # ימים
+                }
+                bucket.lifecycle_rules = [lifecycle_rule]
+                bucket.patch()
+                
+                logger.info(f"Created production bucket: {bucket_name}")
         except Exception as bucket_error:
-            # אם יצירת bucket נכשלה, נשתמש בdefault bucket
+            # fallback - אם יצירת bucket נכשלה
+            logger.warning(f"Bucket creation failed: {bucket_error}")
+            # נסה bucket ברירת מחדל
             bucket_name = f"{GOOGLE_PROJECT_ID}.appspot.com"
             bucket = client.bucket(bucket_name)
-            logger.info(f"Using default bucket: {bucket_name}")
         
-        # יצירת נתיב לקובץ: phone/filename
-        blob_path = f"{phone}/{filename}"
+        # ארגון קבצים לפי תאריך וטלפון - קל לניהול
+        today = dt.datetime.now()
+        phone_clean = phone.replace('+', '').replace('-', '')
+        blob_path = f"{today.year}/{today.month:02d}/{phone_clean}/{filename}"
+        
         blob = bucket.blob(blob_path)
         
-        # העלאת הקובץ
+        # העלאה עם metadata שימושי
         content_type = 'image/jpeg' if filename.lower().endswith(('.jpg', '.jpeg')) else 'image/png'
-        blob.upload_from_string(blob_data, content_type=content_type)
+        blob.content_type = content_type
         
-        # קבלת URL ציבורי
-        blob.make_public()
-        file_url = blob.public_url
+        # הוסף metadata לחיפוש
+        blob.metadata = {
+            'uploaded_by': phone,
+            'upload_date': dt.datetime.now().isoformat(),
+            'original_filename': filename,
+            'source': 'whatsapp_webhook'
+        }
         
-        logger.info(f"File uploaded to Cloud Storage: {file_url}")
-        return blob.name, file_url
+        # העלאה בטוחה
+        blob.upload_from_string(
+            blob_data, 
+            content_type=content_type,
+            timeout=60  # timeout מפורש
+        )
+        
+        # יצירת signed URL לאבטחה (תוקף 30 יום)
+        from datetime import timedelta
+        signed_url = blob.generate_signed_url(
+            version="v4",
+            expiration=timedelta(days=30),
+            method="GET"
+        )
+        
+        logger.info(f"File uploaded successfully: {blob_path}")
+        return blob_path, signed_url
         
     except Exception as e:
         logger.error(f"Cloud Storage upload failed: {e}")
-        return "", f"העלאה נכשלה: {str(e)}"
+        
+        # Fallback graceful - שמור לפחות את הנתונים
+        if "permission" in str(e).lower() or "forbidden" in str(e).lower():
+            return "", f"שגיאת הרשאות Cloud Storage: {str(e)[:100]}"
+        else:
+            return "", f"העלאה נכשלה: {str(e)[:100]}"
 
 def safe_sheets_append_row(row_values: list):
     """הוספת שורה לגיליון עם טיפול בשגיאות"""
