@@ -1,16 +1,15 @@
 import os, re, base64, json, hashlib, datetime as dt, random, logging
 from typing import Optional, Dict, Any, Tuple, List
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Depends
 import httpx
 from dotenv import load_dotenv
-from fastapi.responses import HTMLResponse
+
 import subprocess
 import threading
 from auth_manager import auth_manager
 from auth_endpoints import setup_auth_routes
 import asyncio
-from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse, RedirectResponse
 # Google APIs
 from google.oauth2 import service_account
@@ -19,6 +18,8 @@ from googleapiclient.http import MediaInMemoryUpload
 from google.cloud import storage
 # OpenAI
 from openai import OpenAI
+
+
 
 load_dotenv()
 
@@ -93,6 +94,10 @@ HELP_MSG = """🤖 **מערכת ניהול הוצאות חתונה**
 🔗 לגישה לגיליון - פנו למנהל המערכת"""
 
 # ===== ✅ Utilities with improved error handling =====
+
+
+
+
 def ensure_google():
     global creds, sheets
     if sheets is not None:
@@ -164,23 +169,55 @@ def sha256_b64(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 # ✅ ולידציה של נתוני הוצאה
+# פונקציית validate_expense_data מעודכנת
+
 def validate_expense_data(data: dict) -> tuple[bool, str]:
-    """בדיקה פשוטה של נתוני הוצאה"""
+    """בדיקה פשוטה של נתוני הוצאה עם הקטגוריות החדשות"""
     if not data.get('amount') or not isinstance(data['amount'], (int, float)) or data['amount'] <= 0:
         return False, "❌ סכום לא תקין"
     
     if not data.get('vendor') or len(str(data['vendor']).strip()) < 2:
         return False, "❌ שם ספק לא תקין"
     
+    # 🔥 הקטגוריות החדשות - 15 במקום 9
     valid_categories = [
-        "אולם וקייטרינג","בר/אלכוהול","צילום","מוזיקה/דיג'יי",
-        "בגדים/טבעות","עיצוב/פרחים","הדפסות/הזמנות/מדיה",
-        "לינה/נסיעות/הסעות","אחר"
+        "אולם ואירוח",
+        "קייטרינג ומזון", 
+        "בר ומשקאות",
+        "צילום ווידאו",
+        "מוזיקה ובידור",
+        "בגדים ולבוש",
+        "תכשיטים וטבעות",
+        "פרחים ועיצוב",
+        "יופי וטיפוח",
+        "הדפסות ומדיה",
+        "הסעות ונסיעות",
+        "לינה ואירוח",
+        "מתנות ואביזרים",
+        "אטרקציות ופעילויות",
+        "שירותים נוספים"
     ]
+    
     if data.get('category') not in valid_categories:
         return False, f"❌ קטגוריה לא תקינה: {data.get('category')}"
     
     return True, "✅ תקין"
+
+# אם אתה רוצה להשתמש ב-WEDDING_CATEGORIES שהגדרנו, עדיף ככה:
+def validate_expense_data_smart(data: dict) -> tuple[bool, str]:
+    """גרסה חכמה שמשתמשת במשתנה WEDDING_CATEGORIES"""
+    if not data.get('amount') or not isinstance(data['amount'], (int, float)) or data['amount'] <= 0:
+        return False, "❌ סכום לא תקין"
+    
+    if not data.get('vendor') or len(str(data['vendor']).strip()) < 2:
+        return False, "❌ שם ספק לא תקין"
+    
+    # 🎯 משתמש ברשימה הגלובלית שהגדרנו
+    if data.get('category') not in WEDDING_CATEGORIES:
+        return False, f"❌ קטגוריה לא תקינה: {data.get('category')}"
+    
+    return True, "✅ תקין"
+
 
 # ✅ שליחת הודעה עם טיפול בשגיאות
 async def safe_greenapi_send_text(chat_id: str, text: str):

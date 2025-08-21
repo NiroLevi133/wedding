@@ -9,7 +9,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-# HTML templates
+# HTML template for login page
 LOGIN_PAGE = """
 <!DOCTYPE html>
 <html dir="rtl">
@@ -374,7 +374,7 @@ LOGIN_PAGE = """
                 return;
             }
             
-            currentPhone = phone;  // שמור את המספר כמו שהוא
+            currentPhone = phone;
             const btn = document.getElementById('sendCodeBtn');
             btn.classList.add('loading');
             btn.disabled = true;
@@ -486,151 +486,7 @@ def setup_auth_routes(app, auth_manager, GREEN_ID, GREEN_TOKEN):
                         phone = '+972' + phone[1:]
             
             # ולידציה
-            if not re.match(r'^\+972[0-9]{9}
-            
-            if not success:
-                return JSONResponse({
-                    "success": False,
-                    "message": message
-                })
-            
-            # שלח בווטסאפ
-            if GREEN_ID and GREEN_TOKEN:
-                try:
-                    chat_id = phone.replace('+', '') + '@c.us'
-                    url = f"https://api.green-api.com/waInstance{GREEN_ID}/sendMessage/{GREEN_TOKEN}"
-                    
-                    whatsapp_message = f"""🔐 *קוד אימות למערכת הוצאות החתונה*
-
-הקוד שלך: *{code}*
-
-הקוד תקף ל-10 דקות.
-אל תשתף קוד זה עם אף אחד."""
-                    
-                    async with httpx.AsyncClient(timeout=30) as client:
-                        response = await client.post(url, json={
-                            "chatId": chat_id,
-                            "message": whatsapp_message
-                        })
-                        response.raise_for_status()
-                    
-                    logger.info(f"Verification code sent to {phone}: {code}")
-                    
-                    return JSONResponse({
-                        "success": True,
-                        "message": "קוד נשלח בווטסאפ"
-                    })
-                    
-                except Exception as e:
-                    logger.error(f"Failed to send WhatsApp message: {e}")
-                    return JSONResponse({
-                        "success": False,
-                        "message": "שגיאה בשליחת הודעת ווטסאפ"
-                    })
-            else:
-                # מצב פיתוח - הצג בלוג
-                logger.info(f"DEV MODE - Verification code for {phone}: {code}")
-                return JSONResponse({
-                    "success": True,
-                    "message": f"קוד לפיתוח: {code}"
-                })
-                
-        except Exception as e:
-            logger.error(f"Error in send_verification_code: {e}")
-            return JSONResponse({
-                "success": False,
-                "message": "שגיאה בשרת"
-            })
-    
-    @app.post("/auth/verify-code")
-    async def verify_code(request: Request, response: Response):
-        """מאמת קוד שהוזן"""
-        try:
-            data = await request.json()
-            phone = data.get('phone', '').strip()
-            code = data.get('code', '').strip()
-            
-            # אמת קוד
-            success, message, session_token = auth_manager.verify_code(phone, code)
-            
-            if success:
-                # הצב cookie
-                response.set_cookie(
-                    key="session_token",
-                    value=session_token,
-                    max_age=3600,  # שעה
-                    httponly=True,
-                    secure=True,
-                    samesite="lax"
-                )
-                
-                return JSONResponse({
-                    "success": True,
-                    "message": "אימות הצליח"
-                })
-            else:
-                return JSONResponse({
-                    "success": False,
-                    "message": message
-                })
-                
-        except Exception as e:
-            logger.error(f"Error in verify_code: {e}")
-            return JSONResponse({
-                "success": False,
-                "message": "שגיאה בשרת"
-            })
-    
-    @app.post("/auth/logout")
-    async def logout(request: Request, response: Response):
-        """יציאה מהמערכת"""
-        session_token = request.cookies.get("session_token")
-        
-        if session_token:
-            auth_manager.logout(session_token)
-        
-        response.delete_cookie("session_token")
-        
-        return JSONResponse({
-            "success": True,
-            "message": "יצאת מהמערכת"
-        })
-    
-    @app.get("/auth/check")
-    async def check_auth(request: Request):
-        """בדיקת סטטוס התחברות"""
-        session_token = request.cookies.get("session_token")
-        
-        if not session_token:
-            return JSONResponse({
-                "authenticated": False
-            })
-        
-        is_valid, phone = auth_manager.validate_session(session_token)
-        
-        return JSONResponse({
-            "authenticated": is_valid,
-            "phone": phone if is_valid else None
-        })
-    
-    # Middleware לבדיקת אימות
-    def require_auth(request: Request):
-        """Dependency לדרישת אימות"""
-        session_token = request.cookies.get("session_token")
-        
-        if not session_token:
-            raise HTTPException(status_code=401, detail="Not authenticated")
-        
-        is_valid, phone = auth_manager.validate_session(session_token)
-        
-        if not is_valid:
-            raise HTTPException(status_code=401, detail="Session expired")
-        
-        # הוסף את מספר הטלפון ל-request state
-        request.state.user_phone = phone
-        return phone
-    
-    return require_auth, phone):
+            if not re.match(r'^\+972[0-9]{9}$', phone):
                 return JSONResponse({
                     "success": False,
                     "message": "מספר טלפון לא תקין. הזן מספר ישראלי (למשל: 0501234567)"
