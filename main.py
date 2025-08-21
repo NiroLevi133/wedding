@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaInMemoryUpload
-
+from google.cloud import storage
 # OpenAI
 from openai import OpenAI
 
@@ -220,53 +220,72 @@ async def greenapi_download_media(payload: dict) -> Tuple[bytes, str]:
         logger.error(f"Failed to download media: {e}")
         raise
 
-def ensure_folder(folder_name: str, parent_folder_id: str) -> str:
-    ensure_google()
-    query = f"name='{folder_name}' and parents in '{parent_folder_id}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
-    results = drive.files().list(q=query, fields="files(id, name)").execute()
-    files = results.get('files', [])
-    if files:
-        return files[0]['id']
-    file_metadata = {
-        'name': folder_name,
-        'parents': [parent_folder_id],
-        'mimeType': 'application/vnd.google-apps.folder'
-    }
-    folder = drive.files().create(body=file_metadata, fields='id').execute()
-    return folder.get('id')
-
-# ✅ העלאה ל-Drive עם טיפול בשגיאות
-def safe_upload_to_drive(blob: bytes, filename: str, folder_id: str) -> Tuple[str, str]:
-    """העלאה ל-Drive עם טיפול בשגיאות"""
+def get_storage_client():
+    """יצירת client ל-Cloud Storage"""
     try:
-        ensure_google()
-        if filename.lower().endswith(('.jpg', '.jpeg')):
-            mimetype = 'image/jpeg'
-        elif filename.lower().endswith('.png'):
-            mimetype = 'image/png'
-        elif filename.lower().endswith('.pdf'):
-            mimetype = 'application/pdf'
-        else:
-            mimetype = 'application/octet-stream'
+        # השתמש באותם credentials כמו Google Sheets
+        credentials_dict = {
+            "type": "service_account",
+            "project_id": GOOGLE_PROJECT_ID,
+            "private_key_id": GOOGLE_PRIVATE_KEY_ID or "",
+            "private_key": GOOGLE_PRIVATE_KEY,
+            "client_email": GOOGLE_CLIENT_EMAIL,
+            "client_id": GOOGLE_CLIENT_ID or "",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "universe_domain": "googleapis.com"
+        }
         
-        media = MediaInMemoryUpload(blob, mimetype=mimetype)
-        file_metadata = {'name': filename, 'parents': [folder_id]}
-        file = drive.files().create(body=file_metadata, media_body=media, fields='id').execute()
-        file_id = file.get('id')
+        from google.oauth2 import service_account
+        credentials = service_account.Credentials.from_service_account_info(credentials_dict)
+        client = storage.Client(credentials=credentials, project=GOOGLE_PROJECT_ID)
+        return client
+    except Exception as e:
+        logger.error(f"Failed to create storage client: {e}")
+        return None
+
+def safe_upload_to_storage(blob_data: bytes, filename: str, phone: str) -> Tuple[str, str]:
+    """העלאה ל-Cloud Storage"""
+    try:
+        client = get_storage_client()
+        if not client:
+            return "", "לא הצליח להתחבר ל-Cloud Storage"
         
-        permission = {'type': 'anyone', 'role': 'reader'}
-        drive.permissions().create(fileId=file_id, body=permission).execute()
+        # שם ה-bucket (נשתמש בשם הפרויקט)
+        bucket_name = f"{GOOGLE_PROJECT_ID}-receipts"
         
-        file_url = f"https://drive.google.com/file/d/{file_id}/view"
-        logger.info(f"File uploaded successfully: {file_url}")
-        return file_id, file_url
+        try:
+            # נסה לקבל את ה-bucket או ליצור אותו
+            bucket = client.bucket(bucket_name)
+            if not bucket.exists():
+                bucket = client.create_bucket(bucket_name, location="us-central1")
+                logger.info(f"Created new bucket: {bucket_name}")
+        except Exception as bucket_error:
+            # אם יצירת bucket נכשלה, נשתמש בdefault bucket
+            bucket_name = f"{GOOGLE_PROJECT_ID}.appspot.com"
+            bucket = client.bucket(bucket_name)
+            logger.info(f"Using default bucket: {bucket_name}")
+        
+        # יצירת נתיב לקובץ: phone/filename
+        blob_path = f"{phone}/{filename}"
+        blob = bucket.blob(blob_path)
+        
+        # העלאת הקובץ
+        content_type = 'image/jpeg' if filename.lower().endswith(('.jpg', '.jpeg')) else 'image/png'
+        blob.upload_from_string(blob_data, content_type=content_type)
+        
+        # קבלת URL ציבורי
+        blob.make_public()
+        file_url = blob.public_url
+        
+        logger.info(f"File uploaded to Cloud Storage: {file_url}")
+        return blob.name, file_url
         
     except Exception as e:
-        logger.error(f"Drive upload failed: {e}")
-        # החזר ערכים ברירת מחדל במקום לזרוק exception
-        return "", "העלאה נכשלה - הקבלה נשמרה בלי קובץ"
+        logger.error(f"Cloud Storage upload failed: {e}")
+        return "", f"העלאה נכשלה: {str(e)}"
 
-# ✅ שמירה בגיליון עם טיפול בשגיאות
 def safe_sheets_append_row(row_values: list):
     """הוספת שורה לגיליון עם טיפול בשגיאות"""
     try:
@@ -686,17 +705,22 @@ def clean_receipt_data(data: dict) -> dict:
     
     # תיקון תאריך ישראלי
     if data.get('date'):
-        date_str = str(data['date']).strip()
-        # DD/MM/YYYY -> YYYY-MM-DD
-        match = re.search(r'(\d{1,2})[/./-](\d{1,2})[/./-](\d{4})', date_str)
-        if match:
-            day, month, year = map(int, match.groups())
-            if 1 <= day <= 31 and 1 <= month <= 12 and 2020 <= year <= 2030:
-                data['date'] = f"{year:04d}-{month:02d}-{day:02d}"
-            else:
-                data['date'] = None
+    date_str = str(data['date']).strip()
+    # DD/MM/YYYY -> YYYY-MM-DD
+    match = re.search(r'(\d{1,2})[/./-](\d{1,2})[/./-](\d{4})', date_str)
+    if match:
+        day, month, year = map(int, match.groups())
+        if 1 <= day <= 31 and 1 <= month <= 12 and 2020 <= year <= 2030:
+            data['date'] = f"{year:04d}-{month:02d}-{day:02d}"
         else:
-            data['date'] = None
+            # תאריך לא תקין - השתמש בהיום
+            data['date'] = dt.datetime.now().strftime('%Y-%m-%d')
+    else:
+        # לא נמצא תאריך - השתמש בהיום
+        data['date'] = dt.datetime.now().strftime('%Y-%m-%d')
+else:
+    # אין תאריך בכלל - השתמש בהיום
+    data['date'] = dt.datetime.now().strftime('%Y-%m-%d')
     
     # תיקון סכום
     if data.get('amount'):
@@ -938,11 +962,10 @@ async def webhook(request: Request):
                 drive_url = ""
                 try:
                     today = dt.datetime.now()
-                    phone_folder = ensure_folder(phone, DRIVE_ROOT)
                     safe_vendor = re.sub(r'[^\w\u0590-\u05FF]+', '_', str(ai.get('vendor') or 'vendor'))
                     filename = f"{today.strftime('%Y%m%d')}_{(ai.get('amount') or 'unknown')}_{safe_vendor}_{file_hash[:8]}.{ext}"
-                    file_id, drive_url = safe_upload_to_drive(blob, filename, phone_folder)
-                    logger.info(f"File uploaded successfully to Drive: {drive_url}")
+                    file_id, drive_url = safe_upload_to_storage(blob, filename, phone)
+                    logger.info(f"File uploaded successfully to Cloud Storage: {drive_url}")
                 except Exception as drive_error:
                     logger.error(f"Drive upload failed: {drive_error}")
                     drive_url = "העלאה נכשלה"
