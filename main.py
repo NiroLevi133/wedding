@@ -833,36 +833,14 @@ def dashboard_redirect():
     """
 
 @app.get("/dashboard", response_class=HTMLResponse)
-def dashboard():
-    return """
-    <!DOCTYPE html>
-    <html dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <title>דשבורד הוצאות חתונה</title>
-        <style>
-            body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; direction: rtl; }
-            .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-            .header { text-align: center; color: #333; margin-bottom: 30px; }
-            .coming-soon { text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 10px; margin: 20px 0; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>💒 דשבורד הוצאות החתונה</h1>
-                <p>ברוכים הבאים למערכת ניהול ההוצאות שלכם</p>
-            </div>
-            <div class="coming-soon">
-                <h2>🚧 בקרוב!</h2>
-                <p>הדשבורד בפיתוח ויהיה זמין בקרוב</p>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    
-    
+async def dashboard():
+    """מביא את הדשבורד מקובץ נפרד"""
+    try:
+        from dashboard import dashboard as dashboard_func
+        return await dashboard_func()
+    except Exception as e:
+        return f"<h1>שגיאה: {e}</h1>"
+
 @app.get("/health")
 async def enhanced_health_check():
     """בדיקת תקינות משופרת"""
