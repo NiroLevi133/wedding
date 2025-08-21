@@ -92,31 +92,38 @@ def ensure_google():
         return
     
     try:
-        # ✅ בניית credentials ממשתני סביבה - גישה חדשה
-        if not all([GOOGLE_PROJECT_ID, GOOGLE_PRIVATE_KEY, GOOGLE_CLIENT_EMAIL]):
-            raise RuntimeError("Missing required Google credentials environment variables")
+        # ✅ נסה להשתמש בקובץ JSON שלם
+        google_creds_json = os.getenv("GOOGLE_CREDENTIALS_JSON")
+        if google_creds_json:
+            import json
+            creds_dict = json.loads(google_creds_json)
+            creds = service_account.Credentials.from_service_account_info(
+                creds_dict, scopes=SCOPES
+            )
+        else:
+            # ✅ fallback למשתני סביבה נפרדים
+            if not all([GOOGLE_PROJECT_ID, GOOGLE_PRIVATE_KEY, GOOGLE_CLIENT_EMAIL]):
+                raise RuntimeError("Missing Google credentials")
+            
+            creds_dict = {
+                "type": "service_account",
+                "project_id": GOOGLE_PROJECT_ID,
+                "private_key_id": GOOGLE_PRIVATE_KEY_ID or "",
+                "private_key": GOOGLE_PRIVATE_KEY,
+                "client_email": GOOGLE_CLIENT_EMAIL,
+                "client_id": GOOGLE_CLIENT_ID or "",
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                "universe_domain": "googleapis.com"
+            }
+            creds = service_account.Credentials.from_service_account_info(
+                creds_dict, scopes=SCOPES
+            )
         
-        # צור dictionary עם הcredentials
-        credentials_dict = {
-            "type": "service_account",
-            "project_id": GOOGLE_PROJECT_ID,
-            "private_key_id": GOOGLE_PRIVATE_KEY_ID or "",
-            "private_key": GOOGLE_PRIVATE_KEY,
-            "client_email": GOOGLE_CLIENT_EMAIL,
-            "client_id": GOOGLE_CLIENT_ID or "",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_x509_cert_url": f"https://www.googleapis.com/robot/v1/metadata/x509/{GOOGLE_CLIENT_EMAIL.replace('@', '%40')}",
-            "universe_domain": "googleapis.com"
-        }
-        
-        creds = service_account.Credentials.from_service_account_info(
-            credentials_dict, scopes=SCOPES
-        )
         drive = build("drive", "v3", credentials=creds)
         sheets = build("sheets", "v4", credentials=creds)
-        logger.info("Google services initialized successfully from environment variables")
+        logger.info("Google services initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize Google services: {e}")
         raise
