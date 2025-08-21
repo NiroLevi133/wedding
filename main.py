@@ -704,9 +704,8 @@ def clean_receipt_data(data: dict) -> dict:
     
     # תיקון תאריך ישראלי
     if data.get('date'):
-    date_str = str(data['date']).strip()
-    # DD/MM/YYYY -> YYYY-MM-DD
-    match = re.search(r'(\d{1,2})[/./-](\d{1,2})[/./-](\d{4})', date_str)
+        date_str = str(data['date']).strip()
+        match = re.search(r'(\d{1,2})[/./-](\d{1,2})[/./-](\d{4})', date_str)
     if match:
         day, month, year = map(int, match.groups())
         if 1 <= day <= 31 and 1 <= month <= 12 and 2020 <= year <= 2030:
