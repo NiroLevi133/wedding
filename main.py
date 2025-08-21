@@ -92,23 +92,18 @@ def ensure_google():
         return
     
     try:
-        # ✅ בניית credentials ממשתני סביבה
+        # ✅ בניית credentials ממשתני סביבה - גישה חדשה
         if not all([GOOGLE_PROJECT_ID, GOOGLE_PRIVATE_KEY, GOOGLE_CLIENT_EMAIL]):
             raise RuntimeError("Missing required Google credentials environment variables")
         
-        # ✅ תיקון הפרטי קי - החלפת \\n ב-\n אמיתיים
-        private_key = GOOGLE_PRIVATE_KEY.replace('\\n', '\n').replace('\n\n', '\n')
-        if not private_key.startswith('-----BEGIN'):
-            # אם זה לא מתחיל נכון, נסה להוסיף את הכותרות
-            private_key = f"-----BEGIN PRIVATE KEY-----\n{private_key}\n-----END PRIVATE KEY-----"
-        
-        creds_info = {
+        # צור dictionary עם הcredentials
+        credentials_dict = {
             "type": "service_account",
             "project_id": GOOGLE_PROJECT_ID,
-            "private_key_id": GOOGLE_PRIVATE_KEY_ID,
-            "private_key": private_key,
+            "private_key_id": GOOGLE_PRIVATE_KEY_ID or "",
+            "private_key": GOOGLE_PRIVATE_KEY,
             "client_email": GOOGLE_CLIENT_EMAIL,
-            "client_id": GOOGLE_CLIENT_ID,
+            "client_id": GOOGLE_CLIENT_ID or "",
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
@@ -117,7 +112,7 @@ def ensure_google():
         }
         
         creds = service_account.Credentials.from_service_account_info(
-            creds_info, scopes=SCOPES
+            credentials_dict, scopes=SCOPES
         )
         drive = build("drive", "v3", credentials=creds)
         sheets = build("sheets", "v4", credentials=creds)
