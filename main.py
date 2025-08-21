@@ -47,7 +47,6 @@ ALLOWED_PHONES = set(p.strip() for p in (os.getenv("ALLOWED_PHONES","").split(",
 # === Globals ===
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 creds = None
-drive = None
 sheets = None
 
 oaiclient = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
@@ -521,7 +520,6 @@ def clean_and_validate_data(data: dict) -> dict:
     # תיקון תאריך
     if data.get('date'):
         data['date'] = normalize_date(str(data['date']))
-    
     # תיקון סכום
     if data.get('amount'):
         try:
@@ -700,70 +698,70 @@ JSON נדרש:
         }
 
 def clean_receipt_data(data: dict) -> dict:
-    """ניקוי ואימות הנתונים"""
-    
-    # תיקון תאריך ישראלי
-    if data.get('date'):
-        date_str = str(data['date']).strip()
-        match = re.search(r'(\d{1,2})[/./-](\d{1,2})[/./-](\d{4})', date_str)
-    if match:
-        day, month, year = map(int, match.groups())
-        if 1 <= day <= 31 and 1 <= month <= 12 and 2020 <= year <= 2030:
-            data['date'] = f"{year:04d}-{month:02d}-{day:02d}"
-        else:
-            # תאריך לא תקין - השתמש בהיום
-            data['date'] = dt.datetime.now().strftime('%Y-%m-%d')
-    else:
-        # לא נמצא תאריך - השתמש בהיום
-        data['date'] = dt.datetime.now().strftime('%Y-%m-%d')
-else:
-    # אין תאריך בכלל - השתמש בהיום
-    data['date'] = dt.datetime.now().strftime('%Y-%m-%d')
-    
-    # תיקון סכום
-    if data.get('amount'):
-        try:
-            amount = str(data['amount']).replace(',', '').replace('₪', '').strip()
-            amount = re.sub(r'[^\d.]', '', amount)
-            data['amount'] = float(amount) if amount and float(amount) > 0 else None
-        except:
-            data['amount'] = None
-    
-    # תיקון מטבע
-    if not data.get("currency") or data["currency"] not in ["ILS", "USD", "EUR"]:
-        data["currency"] = "ILS"
-    
-    # תיקון קטגוריה
-    valid_categories = [
-        "אולם וקייטרינג","בר/אלכוהול","צילום","מוזיקה/דיג'יי",
-        "בגדים/טבעות","עיצוב/פרחים","הדפסות/הזמנות/מדיה",
-        "לינה/נסיעות/הסעות","אחר"
-    ]
-    if data.get("category") not in valid_categories:
-        data["category"] = "אחר"
-    
-    # תיקון דרך תשלום
-    payment = data.get('payment_method')
-    if payment:
-        payment = str(payment).lower()
-        if any(word in payment for word in ['אשראי', 'card', 'ויזה', 'מאסטר']):
-            data['payment_method'] = 'card'
-        elif any(word in payment for word in ['מזומן', 'cash']):
-            data['payment_method'] = 'cash'
-        elif any(word in payment for word in ['העברה', 'bank', 'ביט']):
-            data['payment_method'] = 'bank'
-        else:
-            data['payment_method'] = None
-    
-    # ניקוי ספק
-    if data.get('vendor'):
-        vendor = str(data['vendor']).strip()
-        if len(vendor) < 2 or vendor.lower() in ['לא זוהה', 'unknown']:
-            data['vendor'] = None
-        else:
-            data['vendor'] = vendor
-    
-    return data
+   """ניקוי ואימות הנתונים"""
+   
+   # תיקון תאריך ישראלי
+   if data.get('date'):
+       date_str = str(data['date']).strip()
+       match = re.search(r'(\d{1,2})[/./-](\d{1,2})[/./-](\d{4})', date_str)
+       if match:
+           day, month, year = map(int, match.groups())
+           if 1 <= day <= 31 and 1 <= month <= 12 and 2020 <= year <= 2030:
+               data['date'] = f"{year:04d}-{month:02d}-{day:02d}"
+           else:
+               # תאריך לא תקין - השתמש בהיום
+               data['date'] = dt.datetime.now().strftime('%Y-%m-%d')
+       else:
+           # לא נמצא תאריך - השתמש בהיום
+           data['date'] = dt.datetime.now().strftime('%Y-%m-%d')
+   else:
+       # אין תאריך בכלל - השתמש בהיום
+       data['date'] = dt.datetime.now().strftime('%Y-%m-%d')
+   
+   # תיקון סכום
+   if data.get('amount'):
+       try:
+           amount = str(data['amount']).replace(',', '').replace('₪', '').strip()
+           amount = re.sub(r'[^\d.]', '', amount)
+           data['amount'] = float(amount) if amount and float(amount) > 0 else None
+       except:
+           data['amount'] = None
+   
+   # תיקון מטבע
+   if not data.get("currency") or data["currency"] not in ["ILS", "USD", "EUR"]:
+       data["currency"] = "ILS"
+   
+   # תיקון קטגוריה
+   valid_categories = [
+       "אולם וקייטרינג","בר/אלכוהול","צילום","מוזיקה/דיג'יי",
+       "בגדים/טבעות","עיצוב/פרחים","הדפסות/הזמנות/מדיה",
+       "לינה/נסיעות/הסעות","אחר"
+   ]
+   if data.get("category") not in valid_categories:
+       data["category"] = "אחר"
+   
+   # תיקון דרך תשלום
+   payment = data.get('payment_method')
+   if payment:
+       payment = str(payment).lower()
+       if any(word in payment for word in ['אשראי', 'card', 'ויזה', 'מאסטר']):
+           data['payment_method'] = 'card'
+       elif any(word in payment for word in ['מזומן', 'cash']):
+           data['payment_method'] = 'cash'
+       elif any(word in payment for word in ['העברה', 'bank', 'ביט']):
+           data['payment_method'] = 'bank'
+       else:
+           data['payment_method'] = None
+   
+   # ניקוי ספק
+   if data.get('vendor'):
+       vendor = str(data['vendor']).strip()
+       if len(vendor) < 2 or vendor.lower() in ['לא זוהה', 'unknown']:
+           data['vendor'] = None
+       else:
+           data['vendor'] = vendor
+   
+   return data
 
 # ===== FastAPI endpoints =====
 @app.get("/")
