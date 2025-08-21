@@ -9,3 +9,5 @@ google-auth-oauthlib==1.2.1
 openai==1.40.0
 pydantic==2.8.2
 google-cloud-storage==2.10.0
+streamlit==1.32.0
+plotly==5.18.0

@@ -4,6 +4,9 @@ from typing import Optional, Dict, Any, Tuple, List
 from fastapi import FastAPI, Request, HTTPException
 import httpx
 from dotenv import load_dotenv
+from fastapi.responses import HTMLResponse
+import subprocess
+import threading
 
 # Google APIs
 from google.oauth2 import service_account
@@ -814,8 +817,20 @@ def clean_receipt_data(data: dict) -> dict:
 
 # ===== FastAPI endpoints =====
 @app.get("/")
-def home():
-    return {"status": "ok", "message": "מערכת ניהול הוצאות חתונה פעילה! 💒✨"}
+@app.get("/", response_class=HTMLResponse)
+def dashboard_redirect():
+    return """
+    <html>
+        <head>
+            <meta http-equiv="refresh" content="0; url=http://localhost:8501">
+            <title>מערכת ניהול הוצאות חתונה</title>
+        </head>
+        <body>
+            <h1>מפנה לדשבורד...</h1>
+            <p>אם לא מועבר אוטומטית, <a href="http://localhost:8501">לחץ כאן</a></p>
+        </body>
+    </html>
+    """
 
 @app.get("/health")
 async def enhanced_health_check():
@@ -1369,6 +1384,13 @@ async def smart_bilingual_categorization(receipt_data: dict, expense_id: str) ->
     
     return receipt_data
 
+def start_streamlit():
+    """הפעלת Streamlit ברקע"""
+    subprocess.run(["streamlit", "run", "dashboard.py", "--server.port", "8501", "--server.address", "0.0.0.0"])
+
+# הוסף thread לstreamlit
+streamlit_thread = threading.Thread(target=start_streamlit, daemon=True)
+streamlit_thread.start()
 
 if __name__ == "__main__":
     import uvicorn
