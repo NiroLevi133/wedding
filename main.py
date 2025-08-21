@@ -32,7 +32,6 @@ GREEN_TOKEN = os.getenv("GREENAPI_TOKEN", "")
 WEBHOOK_SHARED_SECRET = os.getenv("WEBHOOK_SHARED_SECRET", "")
 
 SHEET_ID = os.getenv("GSHEETS_SPREADSHEET_ID")
-DRIVE_ROOT = os.getenv("GDRIVE_ROOT_FOLDER_ID")
 DEFAULT_CURRENCY = os.getenv("DEFAULT_CURRENCY", "ILS")
 
 # ✅ Google credentials - עכשיו ממשתני סביבה!
@@ -46,7 +45,7 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 ALLOWED_PHONES = set(p.strip() for p in (os.getenv("ALLOWED_PHONES","").split(",") if os.getenv("ALLOWED_PHONES") else []))
 
 # === Globals ===
-SCOPES = ["https://www.googleapis.com/auth/drive", "https://www.googleapis.com/auth/spreadsheets"]
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 creds = None
 drive = None
 sheets = None
@@ -87,8 +86,8 @@ HELP_MSG = """🤖 **מערכת ניהול הוצאות חתונה**
 
 # ===== ✅ Utilities with improved error handling =====
 def ensure_google():
-    global creds, drive, sheets
-    if drive is not None and sheets is not None:
+    global creds, sheets
+    if sheets is not None:
         return
     
     try:
@@ -121,11 +120,11 @@ def ensure_google():
                 creds_dict, scopes=SCOPES
             )
         
-        drive = build("drive", "v3", credentials=creds)
+        
         sheets = build("sheets", "v4", credentials=creds)
-        logger.info("Google services initialized successfully")
+        logger.info("Google Sheets initialized successfully")
     except Exception as e:
-        logger.error(f"Failed to initialize Google services: {e}")
+        logger.error(f"Failed to initialize Google Sheets: {e}")
         raise
 
 def chatid_to_e164(chat_id: str) -> str:
@@ -818,11 +817,31 @@ def debug():
         "openai_configured": bool(OPENAI_API_KEY),
         "greenapi_configured": bool(GREEN_ID and GREEN_TOKEN),
         "sheets_id": SHEET_ID[:10] + "..." if SHEET_ID else "NOT_SET",
-        "drive_root": DRIVE_ROOT[:10] + "..." if DRIVE_ROOT else "NOT_SET",
         "allowed_phones_count": len(ALLOWED_PHONES),
         "links_cache_size": len(links_cache)
     }
 
+@app.get("/startup")
+def startup_check():
+    """בדיקת startup פשוטה"""
+    return {"status": "alive", "timestamp": dt.datetime.now().isoformat()}
+
+@app.get("/readiness")
+def readiness_check():
+    """בדיקת readiness פשוטה"""
+    try:
+        has_sheets = bool(SHEET_ID)
+        has_green = bool(GREEN_ID and GREEN_TOKEN)
+        
+        return {
+            "ready": has_sheets and has_green,
+            "sheets_configured": has_sheets,
+            "green_api_configured": has_green,
+            "timestamp": dt.datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {"ready": False, "error": str(e)}
+    
 @app.post("/webhook")
 async def webhook(request: Request):
     logger.info("Webhook received")
