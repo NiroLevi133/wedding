@@ -834,13 +834,65 @@ def dashboard_redirect():
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
-    """מביא את הדשבורד מקובץ נפרד"""
+    """דשבורד ראשי מקצועי עם נתונים אמיתיים"""
     try:
+        # Import הפונקציה מקובץ dashboard.py
         from dashboard import dashboard as dashboard_func
         return await dashboard_func()
     except Exception as e:
-        return f"<h1>שגיאה: {e}</h1>"
+        logger.error(f"Dashboard error: {e}")
+        return f"""
+        <html dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <title>שגיאה - דשבורד</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 50px; text-align: center; direction: rtl; }}
+                .error {{ color: #d32f2f; }}
+            </style>
+        </head>
+        <body>
+            <div class="error">
+                <h1>❌ שגיאה בטעינת הדשבורד</h1>
+                <p>שגיאה: {str(e)}</p>
+                <p>בדוק שקובץ dashboard.py קיים וכולל את הפונקציה הנדרשת</p>
+                <button onclick="location.reload()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">🔄 נסה שוב</button>
+            </div>
+        </body>
+        </html>
+        """
 
+@app.get("/dashboard-summary", response_class=HTMLResponse)
+async def dashboard_summary_endpoint():
+    """דשבורד סיכום מקצועי עם גרפים וניתוחים"""
+    try:
+        # Import הפונקציה מקובץ dashboard.py
+        from dashboard import dashboard_summary
+        return await dashboard_summary()
+    except Exception as e:
+        logger.error(f"Dashboard summary error: {e}")
+        return f"""
+        <html dir="rtl">
+        <head>
+            <meta charset="UTF-8">
+            <title>שגיאה - דשבורד סיכום</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; padding: 50px; text-align: center; direction: rtl; }}
+                .error {{ color: #d32f2f; }}
+            </style>
+        </head>
+        <body>
+            <div class="error">
+                <h1>❌ שגיאה בטעינת דשבורד הסיכום</h1>
+                <p>שגיאה: {str(e)}</p>
+                <p>בדוק שקובץ dashboard.py כולל את כל הפונקציות הנדרשות</p>
+                <button onclick="location.reload()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">🔄 נסה שוב</button>
+                <a href="/dashboard" style="display: inline-block; margin: 10px; padding: 10px 20px; background: #667eea; color: white; text-decoration: none; border-radius: 5px;">📋 חזור לדשבורד הראשי</a>
+            </div>
+        </body>
+        </html>
+        """
+        
 @app.get("/health")
 async def enhanced_health_check():
     """בדיקת תקינות משופרת"""
