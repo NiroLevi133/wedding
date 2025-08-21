@@ -7,7 +7,11 @@ from dotenv import load_dotenv
 from fastapi.responses import HTMLResponse
 import subprocess
 import threading
-
+from auth_manager import auth_manager
+from auth_endpoints import setup_auth_routes
+import asyncio
+from fastapi import FastAPI, Request, HTTPException, Depends
+from fastapi.responses import HTMLResponse, RedirectResponse
 # Google APIs
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -69,6 +73,8 @@ SHEET_HEADERS = [
     "drive_file_url", "source", "status", "needs_review",
     "created_at", "updated_at", "approved_at"
 ]
+
+require_auth = setup_auth_routes(app, auth_manager, GREEN_ID, GREEN_TOKEN)
 
 # ✅ הודעת עזרה משופרת
 HELP_MSG = """🤖 **מערכת ניהול הוצאות חתונה**
@@ -818,27 +824,23 @@ def clean_receipt_data(data: dict) -> dict:
 # ===== FastAPI endpoints =====
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard_redirect():
-    return """
-    <html>
-        <head>
-            <meta http-equiv="refresh" content="0; url=/dashboard">
-            <title>מערכת ניהול הוצאות חתונה</title>
-        </head>
-        <body>
-            <h1>מפנה לדשבורד...</h1>
-            <p>אם לא מועבר אוטומטית, <a href="/dashboard">לחץ כאן</a></p>
-        </body>
-    </html>
-    """
+def root_redirect():
+    """הפניה לדף הכניסה"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/login", status_code=302)
 
 @app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard():
-    """דשבורד ראשי מקצועי עם נתונים אמיתיים"""
+async def dashboard(request: Request, user_phone: str = Depends(require_auth)):
+    """דשבורד ראשי מקצועי עם נתונים אישיים בלבד"""
     try:
-        # Import הפונקציה מקובץ dashboard.py
         from dashboard import dashboard as dashboard_func
-        return await dashboard_func()
+        
+        # מצא קבוצה אם יש חיבור לבן/בת זוג
+        partner_group = find_group_for_phone(user_phone)
+        
+        # קרא לפונקציה עם הפרמטרים החדשים
+        return await dashboard_func(user_phone, partner_group)
+    
     except Exception as e:
         logger.error(f"Dashboard error: {e}")
         return f"""
@@ -863,12 +865,18 @@ async def dashboard():
         """
 
 @app.get("/dashboard-summary", response_class=HTMLResponse)
-async def dashboard_summary_endpoint():
-    """דשבורד סיכום מקצועי עם גרפים וניתוחים"""
+async def dashboard_summary_endpoint(request: Request, user_phone: str = Depends(require_auth)):
+    """דשבורד סיכום מקצועי עם נתונים אישיים בלבד"""
     try:
         # Import הפונקציה מקובץ dashboard.py
         from dashboard import dashboard_summary
-        return await dashboard_summary()
+        
+        # מצא קבוצה אם יש חיבור לבן/בת זוג
+        partner_group = find_group_for_phone(user_phone)
+        
+        # קרא לפונקציה עם הפרמטרים החדשים
+        return await dashboard_summary(user_phone, partner_group)
+        
     except Exception as e:
         logger.error(f"Dashboard summary error: {e}")
         return f"""
@@ -1453,6 +1461,21 @@ def start_streamlit():
 streamlit_thread = threading.Thread(target=start_streamlit, daemon=True)
 streamlit_thread.start()
 
+# Task לניקוי אוטומטי כל 30 דקות
+
+async def cleanup_task():
+    """מנקה קודים ו-sessions שפגו כל 30 דקות"""
+    while True:
+        await asyncio.sleep(1800)  # 30 דקות
+        auth_manager.cleanup_expired()
+        logger.info("Cleanup task executed")
+
+# הפעל task בהתחלה
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(cleanup_task())
+    logger.info("Auth cleanup task started")
+    
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8080))

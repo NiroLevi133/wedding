@@ -1,5 +1,3 @@
-# dashboard.py - הקובץ המלא והמתוקן
-
 import os
 import json
 import datetime as dt
@@ -63,91 +61,81 @@ def ensure_google():
     except Exception as e:
         raise RuntimeError(f"Failed to initialize Google Sheets: {e}")
 
-async def dashboard():
-    """דשבורד ראשי מקצועי עם נתונים אמיתיים"""
+def get_partner_phones(user_phone: str, partner_group: str) -> list:
+    """מחזיר רשימת טלפונים לחיפוש (המשתמש + בן/בת זוג אם יש)"""
+    phones = [user_phone]
+    
+    if partner_group:
+        # טען את טבלת החיבורים
+        try:
+            ensure_google()
+            result = sheets.spreadsheets().values().get(
+                spreadsheetId=SHEET_ID,
+                range='links!A:C'
+            ).execute()
+            
+            links = result.get('values', [])
+            for row in links:
+                if len(row) >= 3 and row[2] == partner_group:
+                    # מצא את שני המספרים בקבוצה
+                    phone1 = row[0]
+                    phone2 = row[1]
+                    
+                    if phone1 == user_phone and phone2 not in phones:
+                        phones.append(phone2)
+                    elif phone2 == user_phone and phone1 not in phones:
+                        phones.append(phone1)
+        except:
+            pass
+    
+    return phones
+
+async def dashboard(user_phone: str, partner_group: str = None):
+    """דשבורד ראשי מקצועי עם נתונים אישיים בלבד"""
     try:
+        # קבל רשימת טלפונים לסינון
+        allowed_phones = get_partner_phones(user_phone, partner_group)
+        
         # טעינת נתונים מהגיליון
         ensure_google()
         result = sheets.spreadsheets().values().get(
             spreadsheetId=SHEET_ID,
-            range='A:R'  # כל העמודות
+            range='A:R'
         ).execute()
         
         values = result.get('values', [])
         if not values or len(values) < 2:
-            # אם אין נתונים
-            return """
-            <!DOCTYPE html>
-            <html dir="rtl">
-            <head>
-                <meta charset="UTF-8">
-                <title>דשבורד הוצאות חתונה</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; direction: rtl; }
-                    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-                    .no-data { text-align: center; padding: 50px; color: #666; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="no-data">
-                        <h1>💒 דשבורד הוצאות החתונה</h1>
-                        <p>📝 עדיין לא הועלו הוצאות</p>
-                        <p>התחילו לשלוח קבלות בווטסאפ כדי לראות נתונים!</p>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
+            return generate_empty_dashboard(user_phone)
         
-        # עיבוד הנתונים
+        # עיבוד הנתונים - רק של המשתמש והבן/בת זוג
         headers = values[0]
         data_rows = values[1:]
         
-        # יצירת מבנה נתונים
         expenses = []
         for row in data_rows:
-            if len(row) >= 6:  # ודא שיש מספיק עמודות
+            if len(row) >= 6:
                 try:
-                    expense = {
-                        'owner_phone': row[1] if len(row) > 1 else '',
-                        'date': row[3] if len(row) > 3 else '',
-                        'amount': float(row[4]) if len(row) > 4 and row[4] else 0,
-                        'currency': row[5] if len(row) > 5 else 'ILS',
-                        'vendor': row[6] if len(row) > 6 else '',
-                        'category': row[7] if len(row) > 7 else 'אחר',
-                        'payment_method': row[8] if len(row) > 8 else '',
-                        'drive_file_url': row[11] if len(row) > 11 else ''
-                    }
-                    if expense['amount'] > 0:  # רק הוצאות עם סכום
-                        expenses.append(expense)
+                    owner_phone = row[1] if len(row) > 1 else ''
+                    
+                    # סנן רק הוצאות של המשתמש או בן/בת הזוג
+                    if owner_phone in allowed_phones:
+                        expense = {
+                            'owner_phone': owner_phone,
+                            'date': row[3] if len(row) > 3 else '',
+                            'amount': float(row[4]) if len(row) > 4 and row[4] else 0,
+                            'currency': row[5] if len(row) > 5 else 'ILS',
+                            'vendor': row[6] if len(row) > 6 else '',
+                            'category': row[7] if len(row) > 7 else 'אחר',
+                            'payment_method': row[8] if len(row) > 8 else '',
+                            'drive_file_url': row[11] if len(row) > 11 else ''
+                        }
+                        if expense['amount'] > 0:
+                            expenses.append(expense)
                 except (ValueError, IndexError):
                     continue
         
         if not expenses:
-            return """
-            <!DOCTYPE html>
-            <html dir="rtl">
-            <head>
-                <meta charset="UTF-8">
-                <title>דשבורד הוצאות חתונה</title>
-                <style>
-                    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; direction: rtl; }
-                    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }
-                    .no-data { text-align: center; padding: 50px; color: #666; }
-                </style>
-            </head>
-            <body>
-                <div class="container">
-                    <div class="no-data">
-                        <h1>💒 דשבורד הוצאות החתונה</h1>
-                        <p>📊 נמצאו נתונים אך אין הוצאות תקינות</p>
-                        <p>בדקו שהנתונים בגיליון תקינים</p>
-                    </div>
-                </div>
-            </body>
-            </html>
-            """
+            return generate_empty_dashboard(user_phone)
         
         # חישוב סטטיסטיקות
         total_amount = sum(exp['amount'] for exp in expenses)
@@ -176,13 +164,20 @@ async def dashboard():
             "אחר": "📋"
         }
         
+        # שם משתמש לתצוגה
+        display_name = user_phone[-4:]
+        partner_info = ""
+        if partner_group and len(allowed_phones) > 1:
+            partner_phone = [p for p in allowed_phones if p != user_phone][0]
+            partner_info = f" ו-{partner_phone[-4:]}"
+        
         # יצירת HTML דינמי
         dashboard_html = f"""
         <!DOCTYPE html>
         <html dir="rtl">
         <head>
             <meta charset="UTF-8">
-            <title>דשבורד הוצאות חתונה</title>
+            <title>דשבורד הוצאות חתונה - אישי</title>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
                 * {{ margin: 0; padding: 0; box-sizing: border-box; }}
@@ -209,6 +204,36 @@ async def dashboard():
                     color: white; 
                     padding: 30px;
                     text-align: center;
+                    position: relative;
+                }}
+                
+                .logout-btn {{
+                    position: absolute;
+                    top: 20px;
+                    left: 20px;
+                    background: rgba(255,255,255,0.2);
+                    color: white;
+                    border: 1px solid rgba(255,255,255,0.3);
+                    padding: 8px 16px;
+                    border-radius: 20px;
+                    text-decoration: none;
+                    font-size: 0.9rem;
+                    transition: all 0.3s ease;
+                }}
+                
+                .logout-btn:hover {{
+                    background: rgba(255,255,255,0.3);
+                    transform: scale(1.05);
+                }}
+                
+                .user-info {{
+                    position: absolute;
+                    top: 20px;
+                    right: 20px;
+                    background: rgba(255,255,255,0.2);
+                    padding: 8px 16px;
+                    border-radius: 20px;
+                    font-size: 0.9rem;
                 }}
                 
                 .header h1 {{ 
@@ -429,14 +454,17 @@ async def dashboard():
                     .stats-grid {{ grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }}
                     .categories-grid {{ grid-template-columns: 1fr; }}
                     .table-container {{ overflow-x: auto; }}
+                    .user-info, .logout-btn {{ position: static; margin: 10px; }}
                 }}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
+                    <a href="#" class="logout-btn" onclick="logout()">🚪 יציאה</a>
+                    <div class="user-info">👤 {display_name}{partner_info}</div>
                     <h1>💒 דשבורד הוצאות החתונה</h1>
-                    <p>סיכום מלא של ההוצאות שלכם</p>
+                    <p>הנתונים האישיים שלכם</p>
                 </div>
                 
                 <div class="nav-buttons">
@@ -448,7 +476,7 @@ async def dashboard():
                     <div class="stat-card">
                         <div class="stat-icon">💰</div>
                         <div class="stat-value">{total_amount:,.0f} ₪</div>
-                        <div class="stat-label">סך ההוצאות</div>
+                        <div class="stat-label">סך ההוצאות שלכם</div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">📄</div>
@@ -551,6 +579,24 @@ async def dashboard():
             <button class="refresh-btn" onclick="location.reload()" title="רענן נתונים">🔄</button>
             
             <script>
+                // פונקציית יציאה
+                async function logout() {{
+                    if (confirm('האם אתה בטוח שברצונך לצאת?')) {{
+                        try {{
+                            const response = await fetch('/auth/logout', {{
+                                method: 'POST',
+                                credentials: 'same-origin'
+                            }});
+                            if (response.ok) {{
+                                window.location.href = '/login';
+                            }}
+                        }} catch (error) {{
+                            console.error('Logout error:', error);
+                            window.location.href = '/login';
+                        }}
+                    }}
+                }}
+                
                 // רענון אוטומטי כל 5 דקות
                 setTimeout(function() {{
                     location.reload();
@@ -585,34 +631,90 @@ async def dashboard():
         return dashboard_html
         
     except Exception as e:
-        # במקרה של שגיאה
-        return f"""
-        <!DOCTYPE html>
-        <html dir="rtl">
-        <head>
-            <meta charset="UTF-8">
-            <title>דשבורד הוצאות חתונה - שגיאה</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; direction: rtl; }}
-                .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); }}
-                .error {{ text-align: center; padding: 50px; color: #d32f2f; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="error">
-                    <h1>❌ שגיאה בטעינת הנתונים</h1>
-                    <p>אירעה שגיאה בגישה לגיליון: {str(e)}</p>
-                    <p>נסו לרענן את הדף או צרו קשר עם התמיכה</p>
-                    <button onclick="location.reload()" style="padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 5px; cursor: pointer;">🔄 נסה שוב</button>
-                </div>
+        return error_dashboard(str(e), user_phone)
+
+def generate_empty_dashboard(user_phone: str):
+    """HTML למקרה שאין נתונים"""
+    display_name = user_phone[-4:]
+    
+    return f"""
+    <!DOCTYPE html>
+    <html dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>דשבורד הוצאות חתונה</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); direction: rtl; }}
+            .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 50px; border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.1); text-align: center; }}
+            .no-data {{ color: #666; }}
+            .logout-btn {{ background: #dc3545; color: white; padding: 10px 20px; border: none; border-radius: 5px; text-decoration: none; display: inline-block; margin: 20px; }}
+            .user-badge {{ background: #667eea; color: white; padding: 5px 15px; border-radius: 20px; display: inline-block; margin-bottom: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="user-badge">👤 {display_name}</div>
+            <div class="no-data">
+                <h1>💒 דשבורד הוצאות החתונה</h1>
+                <p style="font-size: 1.2rem; margin: 30px 0;">📝 עדיין לא העלית הוצאות</p>
+                <p>התחל לשלוח קבלות בווטסאפ כדי לראות נתונים!</p>
+                <a href="#" onclick="logout()" class="logout-btn">🚪 יציאה</a>
             </div>
-        </body>
-        </html>
-        """
+        </div>
+        <script>
+            async function logout() {{
+                if (confirm('האם אתה בטוח שברצונך לצאת?')) {{
+                    try {{
+                        await fetch('/auth/logout', {{ method: 'POST', credentials: 'same-origin' }});
+                        window.location.href = '/login';
+                    }} catch (error) {{
+                        window.location.href = '/login';
+                    }}
+                }}
+            }}
+        </script>
+    </body>
+    </html>
+    """
 
-# הוסף כאן את כל הפונקציות מהדשבורד סיכום מהקוד שכתבתי קודם...
-
+def error_dashboard(error_msg: str, user_phone: str):
+    """HTML למקרה של שגיאה"""
+    display_name = user_phone[-4:]
+    
+    return f"""
+    <!DOCTYPE html>
+    <html dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>דשבורד הוצאות חתונה - שגיאה</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; direction: rtl; }}
+            .container {{ max-width: 800px; margin: 0 auto; background: white; padding: 50px; border-radius: 15px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; }}
+            .error {{ color: #d32f2f; }}
+            .btn {{ padding: 10px 20px; margin: 10px; border: none; border-radius: 5px; cursor: pointer; text-decoration: none; display: inline-block; }}
+            .retry-btn {{ background: #4caf50; color: white; }}
+            .logout-btn {{ background: #dc3545; color: white; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="error">
+                <h1>❌ שגיאה בטעינת הנתונים</h1>
+                <p>משתמש: {display_name}</p>
+                <p style="margin: 20px 0;">שגיאה: {error_msg}</p>
+                <button onclick="location.reload()" class="btn retry-btn">🔄 נסה שוב</button>
+                <a href="#" onclick="logout()" class="btn logout-btn">🚪 יציאה</a>
+            </div>
+        </div>
+        <script>
+            async function logout() {{
+                await fetch('/auth/logout', {{ method: 'POST', credentials: 'same-origin' }});
+                window.location.href = '/login';
+            }}
+        </script>
+    </body>
+    </html>
+    """
 async def dashboard_summary():
     """דשבורד סיכום מקצועי עם גרפים וניתוחים"""
     try:
