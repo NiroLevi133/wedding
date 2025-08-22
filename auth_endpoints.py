@@ -420,13 +420,11 @@ LOGIN_PAGE = """
             
             try {
                 const response = await fetch('/auth/verify-code', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({
-                        phone: currentPhone,
-                        code: code
-                    })
-                });
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'include',  // 🔧 חשוב מאוד!
+                body: JSON.stringify({phone: phone, code: code})
+            });
                 
                 const data = await response.json();
                 
@@ -554,15 +552,16 @@ def setup_auth_routes(app, auth_manager, GREEN_ID, GREEN_TOKEN):
             success, message, session_token = auth_manager.verify_code(normalized_phone, code)
 
             if success:
-                # הצבת cookie
+                
                 response.set_cookie(
-                    key="session_token",
-                    value=session_token,
-                    max_age=3600,  # שעה
-                    httponly=True,
-                    secure=True,
-                    samesite="lax"
-                )
+                key="session_token",
+                value=session_token,
+                max_age=3600,
+                httponly=False,  # 🔧 שינוי: אפשר גישה לבדיקה
+                secure=False,    # 🔧 שינוי: לא דורש HTTPS
+                samesite="lax",  # 🔧 פחות מגביל
+                path="/"         # 🔧 הוסף: תקף לכל האתר
+            )
                 return JSONResponse({"success": True, "message": "אימות הצליח"})
             else:
                 return JSONResponse({"success": False, "message": message}, status_code=400)
