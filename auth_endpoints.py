@@ -569,38 +569,41 @@ def setup_auth_routes(app, auth_manager, GREEN_ID, GREEN_TOKEN):
             return JSONResponse({"success": False, "message": "שגיאה בשרת"}, status_code=500)
 
     
-@app.post("/auth/verify-code")
-async def verify_code(request: Request, response: Response):
-    """מאמת קוד שהוזן - עם Cookie מתוקן ל-HTTPS"""
-    try:
-        data = await request.json()
-        phone = data.get('phone', '').strip()
-        normalized_phone = normalize_phone_number(phone)
-        code = data.get('code', '').strip()
+    @app.post("/auth/verify-code")
+    async def verify_code(request: Request, response: Response):
+        """מאמת קוד שהוזן - עם Cookie מתוקן ל-HTTPS ושמירת debug_info"""
+        try:
+            data = await request.json()
+            phone = (data.get('phone') or '').strip()
+            normalized_phone = normalize_phone_number(phone)
+            code = (data.get('code') or '').strip()
 
-        logger.info(f"Verifying code for: {normalized_phone}")
+            logger.info(f"Verifying code for: {normalized_phone}")
 
-        # אמת קוד
-        success, message, session_token = auth_manager.verify_code(normalized_phone, code)
+            # אמת קוד
+            success, message, session_token = auth_manager.verify_code(normalized_phone, code)
+            if not success:
+                logger.warning(f"❌ Verification failed: {message}")
+                return JSONResponse({"success": False, "message": message}, status_code=400)
 
-        if success:
             logger.info(f"✅ Code verified, setting cookie for: {normalized_phone}")
-            
-            # 🔧 הגדרות Cookie מתוקנות ל-HTTPS
+
+            # כתיבת ה-cookie על אותו Response שישלח ללקוח
             response.set_cookie(
                 key="session_token",
                 value=session_token,
                 max_age=3600,
-                httponly=True,      # 🔧 שינוי: True לאבטחה
-                secure=True,        # 🔧 שינוי: True ל-HTTPS
-                samesite="lax",     # 🔧 נשאר lax
+                httponly=True,
+                secure=True,      # בענן (HTTPS) נכון שיהיה True
+                samesite="lax",   # אם הפרונט בדומיין אחר → שקול "none"
                 path="/",
-                domain=None         # 🔧 אל תגדיר domain
+                domain=None
             )
-            
-            logger.info(f"✅ Cookie set with secure=True for HTTPS")
-            
-            return JSONResponse({
+
+            logger.info("✅ Cookie set with secure=True for HTTPS")
+
+            # חשוב: להחזיר dict, לא JSONResponse — כדי שה-Set-Cookie באמת יישלח
+            return {
                 "success": True,
                 "message": "אימות הצליח",
                 "debug_info": {
@@ -608,20 +611,12 @@ async def verify_code(request: Request, response: Response):
                     "phone": normalized_phone,
                     "cookie_secure": True
                 }
-            })
-        else:
-            logger.warning(f"❌ Verification failed: {message}")
-            return JSONResponse({
-                "success": False,
-                "message": message
-            }, status_code=400)
+            }
 
-    except Exception as e:
-        logger.error(f"Error in verify_code: {e}", exc_info=True)
-        return JSONResponse({
-            "success": False,
-            "message": "שגיאה בשרת"
-        }, status_code=500)
+        except Exception as e:
+            logger.error(f"Error in verify_code: {e}", exc_info=True)
+            return JSONResponse({"success": False, "message": "שגיאה בשרת"}, status_code=500)
+
 
     
     @app.post("/auth/logout")
