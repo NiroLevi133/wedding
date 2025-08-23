@@ -23,6 +23,9 @@ COPY . .
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONPATH=/app
+ENV PYTHONIOENCODING=utf-8
+ENV TZ=Asia/Jerusalem
+ENV GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
 
 # צור user לא-root לאבטחה
 RUN useradd -r -s /bin/false appuser && chown -R appuser:appuser /app

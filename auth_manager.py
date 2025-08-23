@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 import json
 import logging
 from collections import defaultdict
+from typing import Tuple, Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class AuthManager:
             
         return code
     
-    def is_phone_blocked(self, phone: str) -> tuple[bool, Optional[int]]:
+    def is_phone_blocked(self, phone: str) -> Tuple[bool, Optional[int]]:
         """בודק אם מספר טלפון חסום"""
         if phone in self.blocked_until:
             blocked_until = self.blocked_until[phone]

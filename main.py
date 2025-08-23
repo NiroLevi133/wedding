@@ -1497,15 +1497,7 @@ async def smart_bilingual_categorization(receipt_data: dict, expense_id: str) ->
     
     return receipt_data
 
-def start_streamlit():
-    """הפעלת Streamlit ברקע"""
-    subprocess.run(["streamlit", "run", "dashboard.py", "--server.port", "8501", "--server.address", "0.0.0.0"])
 
-# הוסף thread לstreamlit
-streamlit_thread = threading.Thread(target=start_streamlit, daemon=True)
-streamlit_thread.start()
-
-# Task לניקוי אוטומטי כל 30 דקות
 
 async def cleanup_task():
     """מנקה קודים ו-sessions שפגו כל 30 דקות"""

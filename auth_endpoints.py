@@ -427,12 +427,32 @@ LOGIN_PAGE = """
             });
             
             const data = await response.json();
-            
+
             if (data.success) {
-                showMessage('אימות הצליח! מעביר לדשבורד...', 'success');
-                setTimeout(() => {
-                    window.location.href = '/dashboard';
+                showMessage('אימות הצליח! בודק אימות...', 'success');
+                
+                setTimeout(async () => {
+                    try {
+                        console.log('🔍 Checking authentication...');
+                        const authCheck = await fetch('/auth/check', {credentials: 'include'});
+                        const authData = await authCheck.json();
+                        console.log('Auth check result:', authData);
+                        
+                        if (authData.authenticated) {
+                            console.log('✅ Authentication confirmed');
+                            showMessage('מעביר לדשבורד...', 'success');
+                            window.location.href = '/dashboard';
+                        } else {
+                            console.error('❌ Authentication failed');
+                            showMessage('בעיה באימות, נסה שוב', 'error');
+                            window.location.reload();
+                        }
+                    } catch (error) {
+                        console.error('Auth check error:', error);
+                        window.location.href = '/dashboard';
+                    }
                 }, 1000);
+                
             } else {
                 showMessage(data.message || 'קוד שגוי', 'error');
                 codeInputs.forEach(input => input.value = '');
@@ -483,6 +503,15 @@ def setup_auth_routes(app, auth_manager, GREEN_ID, GREEN_TOKEN):
         """דף הכניסה"""
         return LOGIN_PAGE
 
+    @app.get("/debug/cookies")
+    async def debug_cookies(request: Request):
+        """endpoint לבדיקת cookies - למחיקה אחרי הבדיקה"""
+        return {
+            "cookies": dict(request.cookies),
+            "headers": dict(request.headers),
+            "url": str(request.url)
+        }
+    
     @app.post("/auth/send-code")
     async def send_verification_code(request: Request):
         """שולח קוד אימות בווטסאפ - עם נרמול אחיד"""
@@ -539,36 +568,60 @@ def setup_auth_routes(app, auth_manager, GREEN_ID, GREEN_TOKEN):
             logger.error(f"Error in send_verification_code: {e}")
             return JSONResponse({"success": False, "message": "שגיאה בשרת"}, status_code=500)
 
-    @app.post("/auth/verify-code")
-    async def verify_code(request: Request, response: Response):
-        """מאמת קוד שהוזן"""
-        try:
-            data = await request.json()
-            phone = data.get('phone', '').strip()
-            normalized_phone = normalize_phone_number(phone)
-            code = data.get('code', '').strip()
+    
+@app.post("/auth/verify-code")
+async def verify_code(request: Request, response: Response):
+    """מאמת קוד שהוזן - עם Cookie מתוקן ל-HTTPS"""
+    try:
+        data = await request.json()
+        phone = data.get('phone', '').strip()
+        normalized_phone = normalize_phone_number(phone)
+        code = data.get('code', '').strip()
 
-            # אמת קוד (שימוש במספר המנורמל!)
-            success, message, session_token = auth_manager.verify_code(normalized_phone, code)
+        logger.info(f"Verifying code for: {normalized_phone}")
 
-            if success:
-                
-                response.set_cookie(
+        # אמת קוד
+        success, message, session_token = auth_manager.verify_code(normalized_phone, code)
+
+        if success:
+            logger.info(f"✅ Code verified, setting cookie for: {normalized_phone}")
+            
+            # 🔧 הגדרות Cookie מתוקנות ל-HTTPS
+            response.set_cookie(
                 key="session_token",
                 value=session_token,
                 max_age=3600,
-                httponly=False,  # 🔧 שינוי: אפשר גישה לבדיקה
-                secure=False,    # 🔧 שינוי: לא דורש HTTPS
-                samesite="lax",  # 🔧 פחות מגביל
-                path="/"         # 🔧 הוסף: תקף לכל האתר
+                httponly=True,      # 🔧 שינוי: True לאבטחה
+                secure=True,        # 🔧 שינוי: True ל-HTTPS
+                samesite="lax",     # 🔧 נשאר lax
+                path="/",
+                domain=None         # 🔧 אל תגדיר domain
             )
-                return JSONResponse({"success": True, "message": "אימות הצליח"})
-            else:
-                return JSONResponse({"success": False, "message": message}, status_code=400)
+            
+            logger.info(f"✅ Cookie set with secure=True for HTTPS")
+            
+            return JSONResponse({
+                "success": True,
+                "message": "אימות הצליח",
+                "debug_info": {
+                    "token_preview": session_token[:10],
+                    "phone": normalized_phone,
+                    "cookie_secure": True
+                }
+            })
+        else:
+            logger.warning(f"❌ Verification failed: {message}")
+            return JSONResponse({
+                "success": False,
+                "message": message
+            }, status_code=400)
 
-        except Exception as e:
-            logger.error(f"Error in verify_code: {e}")
-            return JSONResponse({"success": False, "message": "שגיאה בשרת"}, status_code=500)
+    except Exception as e:
+        logger.error(f"Error in verify_code: {e}", exc_info=True)
+        return JSONResponse({
+            "success": False,
+            "message": "שגיאה בשרת"
+        }, status_code=500)
 
     
     @app.post("/auth/logout")
@@ -605,19 +658,37 @@ def setup_auth_routes(app, auth_manager, GREEN_ID, GREEN_TOKEN):
     
     # Middleware לבדיקת אימות
     def require_auth(request: Request):
-        """Dependency לדרישת אימות"""
+        """Dependency לדרישת אימות - עם לוגים מפורטים"""
+        
+        logger.info(f"=== Authentication Check ===")
+        logger.info(f"Request URL: {request.url}")
+        logger.info(f"Request headers: {dict(request.headers)}")
+        logger.info(f"All cookies: {dict(request.cookies)}")
+        
+        # בדוק session token
         session_token = request.cookies.get("session_token")
         
         if not session_token:
-            raise HTTPException(status_code=401, detail="Not authenticated")
+            logger.warning("❌ No session_token cookie found")
+            logger.info(f"Available cookies: {list(request.cookies.keys())}")
+            raise HTTPException(status_code=401, detail="Not authenticated - no session token")
         
-        is_valid, phone = auth_manager.validate_session(session_token)
+        logger.info(f"✅ Session token found: {session_token[:10]}...")
+        
+        # אמת session
+        try:
+            is_valid, phone = auth_manager.validate_session(session_token)
+            logger.info(f"Session validation: valid={is_valid}, phone={phone}")
+        except Exception as e:
+            logger.error(f"Session validation error: {e}")
+            raise HTTPException(status_code=401, detail="Session validation failed")
         
         if not is_valid:
+            logger.warning(f"❌ Invalid session token")
             raise HTTPException(status_code=401, detail="Session expired")
         
-        # הוסף את מספר הטלפון ל-request state
         request.state.user_phone = phone
+        logger.info(f"✅ Authentication successful for: {phone}")
         return phone
     
     return require_auth
