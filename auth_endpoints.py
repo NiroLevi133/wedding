@@ -404,47 +404,47 @@ LOGIN_PAGE = """
         
         // אימות קוד
         document.getElementById('codeForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            
-            const codeInputs = document.querySelectorAll('.code-input');
-            const code = Array.from(codeInputs).map(input => input.value).join('');
-            
-            if (code.length !== 6) {
-                showMessage('יש להזין קוד בן 6 ספרות', 'error');
-                return;
-            }
-            
-            const btn = document.getElementById('verifyBtn');
-            btn.classList.add('loading');
-            btn.disabled = true;
-            
-            try {
-                const response = await fetch('/auth/verify-code', {
+        e.preventDefault();
+        
+        const codeInputs = document.querySelectorAll('.code-input');
+        const code = Array.from(codeInputs).map(input => input.value).join('');
+        
+        if (code.length !== 6) {
+            showMessage('יש להזין קוד בן 6 ספרות', 'error');
+            return;
+        }
+        
+        const btn = document.getElementById('verifyBtn');
+        btn.classList.add('loading');
+        btn.disabled = true;
+        
+        try {
+            const response = await fetch('/auth/verify-code', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                credentials: 'include',  // 🔧 חשוב מאוד!
-                body: JSON.stringify({phone: phone, code: code})
+                credentials: 'include',
+                body: JSON.stringify({phone: currentPhone, code: code})  // ✅ currentPhone!
             });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    showMessage('אימות הצליח! מעביר לדשבורד...', 'success');
-                    setTimeout(() => {
-                        window.location.href = '/dashboard';
-                    }, 1000);
-                } else {
-                    showMessage(data.message || 'קוד שגוי', 'error');
-                    codeInputs.forEach(input => input.value = '');
-                    codeInputs[0].focus();
-                }
-            } catch (error) {
-                showMessage('שגיאה בחיבור לשרת', 'error');
-            } finally {
-                btn.classList.remove('loading');
-                btn.disabled = false;
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                showMessage('אימות הצליח! מעביר לדשבורד...', 'success');
+                setTimeout(() => {
+                    window.location.href = '/dashboard';
+                }, 1000);
+            } else {
+                showMessage(data.message || 'קוד שגוי', 'error');
+                codeInputs.forEach(input => input.value = '');
+                codeInputs[0].focus();
             }
-        });
+        } catch (error) {
+            showMessage('שגיאה בחיבור לשרת', 'error');
+        } finally {
+            btn.classList.remove('loading');
+            btn.disabled = false;
+        }
+    });
         
         // כפתור חזור
         document.getElementById('backBtn').addEventListener('click', () => {

@@ -143,8 +143,15 @@ def ensure_google():
 def chatid_to_e164(chat_id: str) -> str:
     if not chat_id:
         return ""
+    
     num = chat_id.split("@")[0]
-    return f"+{num}" if not num.startswith("+") else num
+    
+    # בדוק שזה רק ספרות ואורך הגיוני
+    if not num.isdigit() or len(num) < 10 or len(num) > 15:
+        logger.warning(f"Invalid chat_id: {chat_id}")
+        return ""
+    
+    return f"+{num}"
 
 def e164_to_chatid(phone_e164: str) -> str:
     digits = phone_e164.replace("+", "").strip()
