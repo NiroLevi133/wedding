@@ -661,7 +661,7 @@ class AdminPanel:
                 }});
                 
                 // פונקציות אדמין
-                async function createNewCouple() {
+                async function createNewCouple() {{
                     const phone1 = document.getElementById('phone1').value.trim();
                     const phone2 = document.getElementById('phone2').value.trim();
                     const weddingDate = document.getElementById('weddingDate').value;
@@ -669,45 +669,45 @@ class AdminPanel:
                     const statusDiv = document.getElementById('createStatus');
                     
                     // ולידציה בסיסית
-                    if (!phone1 || !phone2) {
+                    if (!phone1 || !phone2) {{
                         statusDiv.innerHTML = '❌ יש למלא את שני מספרי הטלפון';
                         statusDiv.className = 'alert alert-error';
                         statusDiv.style.display = 'block';
                         return;
-                    }
+                    }}
                     
-                    if (phone1 === phone2) {
+                    if (phone1 === phone2) {{
                         statusDiv.innerHTML = '❌ מספרי הטלפון לא יכולים להיות זהים';
                         statusDiv.className = 'alert alert-error';
                         statusDiv.style.display = 'block';
                         return;
-                    }
+                    }}
                     
                     // הצגת loading
                     statusDiv.innerHTML = '⏳ יוצר קבוצה ושולח הודעת פתיחה...';
                     statusDiv.className = 'alert alert-info';
                     statusDiv.style.display = 'block';
                     
-                    try {
-                        const response = await fetch('/admin/api/create-couple', {
+                    try {{
+                        const response = await fetch('/admin/api/create-couple', {{
                             method: 'POST',
-                            headers: {
+                            headers: {{
                                 'Content-Type': 'application/json',
                                 'X-Admin-Token': document.cookie.split('admin_token=')[1]?.split(';')[0]
-                            },
-                            body: JSON.stringify({
+                            }},
+                            body: JSON.stringify({{
                                 phone1: phone1,
                                 phone2: phone2,
                                 wedding_date: weddingDate || null,
                                 budget: budget || 'אין עדיין'
-                            })
-                        });
+                            }})
+                        }});
                         
                         const result = await response.json();
                         
-                        if (result.success) {
+                        if (result.success) {{
                             statusDiv.innerHTML = `✅ קבוצה נוצרה בהצלחה!<br>
-                                                  📱 קבוצה: ${result.group_id}<br>
+                                                  📱 קבוצה: ${{result.group_id}}<br>
                                                   💬 הודעת פתיחה נשלחה`;
                             statusDiv.className = 'alert alert-success';
                             
@@ -718,20 +718,20 @@ class AdminPanel:
                             document.getElementById('budget').value = '';
                             
                             // רענן את הדף אחרי 3 שניות
-                            setTimeout(() => {
+                            setTimeout(() => {{
                                 location.reload();
-                            }, 3000);
+                            }}, 3000);
                             
-                        } else {
-                            statusDiv.innerHTML = `❌ שגיאה: ${result.error}`;
+                        }} else {{
+                            statusDiv.innerHTML = `❌ שגיאה: ${{result.error}}`;
                             statusDiv.className = 'alert alert-error';
-                        }
+                        }}
                         
-                    } catch (error) {
-                        statusDiv.innerHTML = `❌ שגיאה בחיבור: ${error.message}`;
+                    }} catch (error) {{
+                        statusDiv.innerHTML = `❌ שגיאה בחיבור: ${{error.message}}`;
                         statusDiv.className = 'alert alert-error';
-                    }
-                }
+                    }}
+                }}
                 
                 async function sendSummary(groupId) {{
                     if (!confirm('שלח סיכום שבועי לקבוצה זו?')) return;
