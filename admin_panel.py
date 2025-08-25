@@ -495,6 +495,38 @@ class AdminPanel:
                     </div>
                 </div>
                 
+                
+                <!-- טבלת זוגות -->
+                <div class="section">
+                    <div class="section-header">
+                        ➕ הוספת זוג חדש
+                    </div>
+                    <div class="section-content">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">📱 טלפון חתן:</label>
+                                <input type="tel" id="phone1" class="form-input" placeholder="+972501234567" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">📱 טלפון כלה:</label>
+                                <input type="tel" id="phone2" class="form-input" placeholder="+972502345678" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">📅 תאריך חתונה:</label>
+                                <input type="date" id="weddingDate" class="form-input" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px;">
+                            </div>
+                            <div>
+                                <label style="display: block; margin-bottom: 5px; font-weight: bold;">💰 תקציב:</label>
+                                <input type="number" id="budget" class="form-input" placeholder="80000" style="width: 100%; padding: 10px; border: 2px solid #ddd; border-radius: 8px;">
+                            </div>
+                        </div>
+                        <button onclick="createNewCouple()" class="btn btn-success" style="padding: 12px 24px; font-size: 1rem;">
+                            🚀 צור קבוצה ושלח הודעת פתיחה
+                        </button>
+                        <div id="createStatus" style="margin-top: 15px; padding: 10px; border-radius: 8px; display: none;"></div>
+                    </div>
+                </div>
+                
                 <!-- טבלת זוגות -->
                 <div class="section">
                     <div class="section-header">
@@ -629,6 +661,78 @@ class AdminPanel:
                 }});
                 
                 // פונקציות אדמין
+                async function createNewCouple() {
+                    const phone1 = document.getElementById('phone1').value.trim();
+                    const phone2 = document.getElementById('phone2').value.trim();
+                    const weddingDate = document.getElementById('weddingDate').value;
+                    const budget = document.getElementById('budget').value;
+                    const statusDiv = document.getElementById('createStatus');
+                    
+                    // ולידציה בסיסית
+                    if (!phone1 || !phone2) {
+                        statusDiv.innerHTML = '❌ יש למלא את שני מספרי הטלפון';
+                        statusDiv.className = 'alert alert-error';
+                        statusDiv.style.display = 'block';
+                        return;
+                    }
+                    
+                    if (phone1 === phone2) {
+                        statusDiv.innerHTML = '❌ מספרי הטלפון לא יכולים להיות זהים';
+                        statusDiv.className = 'alert alert-error';
+                        statusDiv.style.display = 'block';
+                        return;
+                    }
+                    
+                    // הצגת loading
+                    statusDiv.innerHTML = '⏳ יוצר קבוצה ושולח הודעת פתיחה...';
+                    statusDiv.className = 'alert alert-info';
+                    statusDiv.style.display = 'block';
+                    
+                    try {
+                        const response = await fetch('/admin/api/create-couple', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'X-Admin-Token': document.cookie.split('admin_token=')[1]?.split(';')[0]
+                            },
+                            body: JSON.stringify({
+                                phone1: phone1,
+                                phone2: phone2,
+                                wedding_date: weddingDate || null,
+                                budget: budget || 'אין עדיין'
+                            })
+                        });
+                        
+                        const result = await response.json();
+                        
+                        if (result.success) {
+                            statusDiv.innerHTML = `✅ קבוצה נוצרה בהצלחה!<br>
+                                                  📱 קבוצה: ${result.group_id}<br>
+                                                  💬 הודעת פתיחה נשלחה`;
+                            statusDiv.className = 'alert alert-success';
+                            
+                            // נקה את הטופס
+                            document.getElementById('phone1').value = '';
+                            document.getElementById('phone2').value = '';
+                            document.getElementById('weddingDate').value = '';
+                            document.getElementById('budget').value = '';
+                            
+                            // רענן את הדף אחרי 3 שניות
+                            setTimeout(() => {
+                                location.reload();
+                            }, 3000);
+                            
+                        } else {
+                            statusDiv.innerHTML = `❌ שגיאה: ${result.error}`;
+                            statusDiv.className = 'alert alert-error';
+                        }
+                        
+                    } catch (error) {
+                        statusDiv.innerHTML = `❌ שגיאה בחיבור: ${error.message}`;
+                        statusDiv.className = 'alert alert-error';
+                    }
+                }
+                
                 async function sendSummary(groupId) {{
                     if (!confirm('שלח סיכום שבועי לקבוצה זו?')) return;
                     

@@ -122,6 +122,9 @@ AI_SETTINGS = {
     }
 }
 
+# === הגדרות בוט ===
+BOT_PHONE_NUMBER = os.getenv("BOT_PHONE_NUMBER", "+972507676706")
+
 # === הגדרות WhatsApp ===
 WHATSAPP_SETTINGS = {
     "api_timeout": 30,

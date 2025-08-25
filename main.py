@@ -254,6 +254,163 @@ async def admin_expenses(group_id: str):
     """Admin API - Get expenses for specific group"""
     return await admin_panel.get_group_expenses(group_id)
 
+@app.post("/admin/api/create-couple", dependencies=[Depends(get_admin_auth())])
+async def admin_create_couple(request: Request):
+    """Admin API - Create new couple with WhatsApp group"""
+    try:
+        data = await request.json()
+        phone1 = data.get("phone1", "").strip()
+        phone2 = data.get("phone2", "").strip()
+        wedding_date = data.get("wedding_date")
+        budget = data.get("budget", "אין עדיין")
+        
+        # ולידציה
+        if not phone1 or not phone2:
+            return JSONResponse({"success": False, "error": "חסרים מספרי טלפון"})
+        
+        if phone1 == phone2:
+            return JSONResponse({"success": False, "error": "מספרי הטלפון זהים"})
+        
+        # נרמול מספרי טלפון
+        if not phone1.startswith('+'):
+            phone1 = '+' + phone1
+        if not phone2.startswith('+'):
+            phone2 = '+' + phone2
+        
+        # יצירת קבוצה בWhatsApp
+        group_result = await create_whatsapp_group(phone1, phone2, wedding_date)
+        
+        if not group_result["success"]:
+            return JSONResponse({"success": False, "error": group_result["error"]})
+        
+        group_id = group_result["group_id"]
+        
+        # שמירה בדאטה בייס
+        couple_data = {
+            "phone1": phone1,
+            "phone2": phone2, 
+            "whatsapp_group_id": group_id,
+            "budget": budget,
+            "wedding_date": wedding_date,
+            "created_at": datetime.now().isoformat(),
+            "status": "active"
+        }
+        
+        # שמירה בגיליון couples
+        success = await save_couple_to_sheet(couple_data)
+        
+        if not success:
+            return JSONResponse({"success": False, "error": "שגיאה בשמירת הנתונים"})
+        
+        # שליחת הודעת פתיחה
+        welcome_sent = await send_welcome_message(group_id)
+        
+        return JSONResponse({
+            "success": True,
+            "group_id": group_id,
+            "welcome_sent": welcome_sent,
+            "message": "קבוצה נוצרה והודעת פתיחה נשלחה"
+        })
+        
+    except Exception as e:
+        logger.error(f"Failed to create couple: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
+async def create_whatsapp_group(phone1: str, phone2: str, wedding_date: str = None) -> Dict:
+    """יוצר קבוצת WhatsApp עם הבוט ושני המספרים"""
+    try:
+        from config import BOT_PHONE_NUMBER
+        
+        # הכנת שם קבוצה
+        date_str = ""
+        if wedding_date:
+            try:
+                date_obj = datetime.strptime(wedding_date, '%Y-%m-%d')
+                date_str = f" - {date_obj.strftime('%d/%m/%Y')}"
+            except:
+                pass
+        
+        group_name = f"💒 הוצאות החתונה{date_str}"
+        
+        # רשימת משתתפים (בוט + שני המספרים)
+        participants = [
+            BOT_PHONE_NUMBER.replace('+', '') + "@c.us",
+            phone1.replace('+', '') + "@c.us", 
+            phone2.replace('+', '') + "@c.us"
+        ]
+        
+        # יצירת קבוצה עם Green API
+        url = f"https://api.green-api.com/waInstance{GREENAPI_INSTANCE_ID}/createGroup/{GREENAPI_TOKEN}"
+        
+        payload = {
+            "groupName": group_name,
+            "chatIds": participants
+        }
+        
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            
+            result = response.json()
+            
+            if result.get("created"):
+                group_id = result.get("chatId")
+                logger.info(f"WhatsApp group created: {group_id}")
+                
+                return {
+                    "success": True,
+                    "group_id": group_id,
+                    "group_name": group_name
+                }
+            else:
+                error_msg = result.get("message", "יצירת קבוצה נכשלה")
+                logger.error(f"Group creation failed: {error_msg}")
+                return {"success": False, "error": error_msg}
+                
+    except Exception as e:
+        logger.error(f"WhatsApp group creation failed: {e}")
+        return {"success": False, "error": f"שגיאה ביצירת קבוצה: {str(e)}"}
+
+async def save_couple_to_sheet(couple_data: Dict) -> bool:
+    """שומר זוג חדש בגיליון couples"""
+    try:
+        from config import COUPLES_HEADERS
+        
+        # יצירת שורה לפי סדר הכותרות
+        row_values = []
+        for header in COUPLES_HEADERS:
+            value = couple_data.get(header, '')
+            row_values.append(str(value) if value is not None else '')
+        
+        return db._append_sheet_row("couples!A:G", row_values)
+        
+    except Exception as e:
+        logger.error(f"Failed to save couple to sheet: {e}")
+        return False
+
+async def send_welcome_message(group_id: str) -> bool:
+    """שולח הודעת פתיחה לקבוצה החדשה"""
+    try:
+        welcome_msg = messages.welcome_message_step1()
+        
+        url = f"https://api.green-api.com/waInstance{GREENAPI_INSTANCE_ID}/sendMessage/{GREENAPI_TOKEN}"
+        
+        payload = {
+            "chatId": group_id,
+            "message": welcome_msg
+        }
+        
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(url, json=payload)
+            response.raise_for_status()
+            
+            logger.info(f"Welcome message sent to group: {group_id}")
+            return True
+            
+    except Exception as e:
+        logger.error(f"Failed to send welcome message: {e}")
+        return False
+
 @app.post("/admin/api/send-summary/{group_id}", dependencies=[Depends(get_admin_auth())])
 async def admin_send_summary(group_id: str):
     """Admin API - Send weekly summary to specific group"""
