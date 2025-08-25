@@ -54,6 +54,110 @@ admin_panel = AdminPanel(db)
 # Global state for admin authentication
 ADMIN_SESSION_TOKEN = None
 
+
+
+def debug_config():
+    """
+    פונקציית דיבאג לבדיקת משתני סביבה
+    """
+    print("=" * 50)
+    print("🔍 DEBUG: בדיקת משתני סביבה")
+    print("=" * 50)
+    
+    # רשימת כל המשתנים הנדרשים
+    required_vars = [
+        "GREENAPI_INSTANCE_ID",
+        "GREENAPI_TOKEN", 
+        "OPENAI_API_KEY",
+        "GSHEETS_SPREADSHEET_ID",
+        "GOOGLE_CREDENTIALS_JSON",
+        "DEFAULT_CURRENCY",
+        "DEFAULT_TIMEZONE",
+        "WEBHOOK_SHARED_SECRET",
+        "ALLOWED_PHONES",
+        "PORT",
+        "DEBUG"
+    ]
+    
+    print("📋 בדיקת משתנים בסיסיים:")
+    for var in required_vars:
+        value = os.getenv(var)
+        if value:
+            # הצג רק חלק מהערך למשתנים רגישים
+            if var in ["GREENAPI_TOKEN", "OPENAI_API_KEY", "WEBHOOK_SHARED_SECRET"]:
+                display_value = f"{value[:8]}...{value[-4:]}" if len(value) > 12 else "***"
+            elif var == "GOOGLE_CREDENTIALS_JSON":
+                try:
+                    import json
+                    json_data = json.loads(value)
+                    display_value = f"JSON תקין - project_id: {json_data.get('project_id', 'לא נמצא')}"
+                except json.JSONDecodeError:
+                    display_value = "❌ JSON לא תקין!"
+            else:
+                display_value = value
+            print(f"  ✅ {var}: {display_value}")
+        else:
+            print(f"  ❌ {var}: חסר!")
+    
+    print("\n" + "=" * 30)
+    print("🔧 ערכי config.py:")
+    print("=" * 30)
+    
+    # בדוק ערכים מהקובץ config.py
+    try:
+        from config import (
+            GREENAPI_INSTANCE_ID, GREENAPI_TOKEN, OPENAI_API_KEY,
+            GSHEETS_SPREADSHEET_ID, DEFAULT_CURRENCY, DEFAULT_TIMEZONE,
+            WEBHOOK_SHARED_SECRET, ALLOWED_PHONES, PORT, DEBUG,
+            validate_config
+        )
+        
+        print(f"GREENAPI_INSTANCE_ID: {'✅ מוגדר' if GREENAPI_INSTANCE_ID else '❌ ריק'}")
+        print(f"GREENAPI_TOKEN: {'✅ מוגדר' if GREENAPI_TOKEN else '❌ ריק'}")
+        print(f"OPENAI_API_KEY: {'✅ מוגדר' if OPENAI_API_KEY else '❌ ריק'}")
+        print(f"GSHEETS_SPREADSHEET_ID: {'✅ מוגדר' if GSHEETS_SPREADSHEET_ID else '❌ ריק'}")
+        print(f"WEBHOOK_SHARED_SECRET: {'✅ מוגדר' if WEBHOOK_SHARED_SECRET else '❌ ריק'}")
+        print(f"DEFAULT_CURRENCY: {DEFAULT_CURRENCY}")
+        print(f"DEFAULT_TIMEZONE: {DEFAULT_TIMEZONE}")
+        print(f"ALLOWED_PHONES: {len(ALLOWED_PHONES)} טלפונים")
+        print(f"PORT: {PORT}")
+        print(f"DEBUG: {DEBUG}")
+        
+        # הרץ בדיקת תקינות
+        print(f"\n🔍 תוצאות validate_config():")
+        validation_results = validate_config()
+        for service, is_valid in validation_results.items():
+            status = "✅" if is_valid else "❌"
+            print(f"  {status} {service}: {'תקין' if is_valid else 'חסר/שגוי'}")
+            
+    except ImportError as e:
+        print(f"❌ שגיאה בייבוא config.py: {e}")
+    except Exception as e:
+        print(f"❌ שגיאה כללית: {e}")
+    
+    print("\n" + "=" * 30)
+    print("🌐 בדיקת חיבור לפורט:")
+    print("=" * 30)
+    print(f"PORT מ-environment: {os.getenv('PORT', 'לא מוגדר')}")
+    print(f"PORT מ-config: {PORT}")
+    
+    # בדוק אם השרת מקשיב על הפורט הנכון
+    import socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('0.0.0.0', PORT))
+        if result == 0:
+            print(f"✅ פורט {PORT} זמין")
+        else:
+            print(f"❌ פורט {PORT} לא זמין")
+        sock.close()
+    except Exception as e:
+        print(f"❌ שגיאה בבדיקת פורט: {e}")
+    
+    print("=" * 50)
+    print("סיום דיבאג")
+    print("=" * 50)
+    
 def verify_webhook_signature(request: Request) -> bool:
     """Verify webhook signature for security"""
     if not WEBHOOK_SHARED_SECRET:
