@@ -15,6 +15,24 @@
 
 ## 🚀 פריסה ב-Google Cloud
 
+### דרישות מקדימות
+
+1. **Google Cloud Account** עם פרויקט פעיל
+2. **Google Cloud CLI** מותקן
+3. **Service Account** עם הרשאות ל-Sheets
+4. **OpenAI API Key**
+5. **Green API** (WhatsApp) credentials
+
+### הגדרת Google Sheets
+
+1. צור Google Sheets חדש
+2. הוסף 3 גיליונות:
+   - `expenses` - הוצאות
+   - `couples` - זוגות
+   - `vendors` - ספקים למידה
+3. הוסף כותרות לכל גיליון (ראה מדריך מפורט במסמכים)
+4. שתף עם Service Account
+
 ### משתני סביבה נדרשים
 
 ```bash
@@ -245,6 +263,5 @@ curl -H "Authorization: Bearer $OPENAI_API_KEY" \
 ## 🎉 המערכת מוכנה!
 
 המערכת תומכת באלפי זוגות במקביל וכוללת כל מה שצריך לניהול מקצועי של הוצאות חתונה.
-
 
 **בהצלחה! 💒**
