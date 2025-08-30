@@ -1,4 +1,5 @@
 import os
+import sys
 from typing import Dict, List
 from dotenv import load_dotenv
 
@@ -174,3 +175,28 @@ SAFETY_SETTINGS = {
     "rate_limit_per_group": 50,  # מקסימום 50 קבלות ביום לקבוצה
     "max_edit_attempts": 5  # מקסימום 5 ניסיונות עריכה לקבלה
 }
+
+# === בדיקת תקינות בטעינה ===
+def validate_required_env_vars() -> bool:
+    """בודק שמשתני הסביבה הקריטיים קיימים"""
+    required = {
+        "GREENAPI_INSTANCE_ID": GREENAPI_INSTANCE_ID,
+        "GREENAPI_TOKEN": GREENAPI_TOKEN,
+        "GSHEETS_SPREADSHEET_ID": GSHEETS_SPREADSHEET_ID,
+        "GOOGLE_CREDENTIALS_JSON": GOOGLE_CREDENTIALS_JSON
+    }
+    
+    missing = [name for name, value in required.items() if not value]
+    
+    if missing:
+        print(f"❌ Missing environment variables: {', '.join(missing)}")
+        print("Please set these environment variables before starting the application.")
+        return False
+    
+    print("✅ All required environment variables are set")
+    return True
+
+# הרצה בטעינה - בדיקה בסיסית בלבד, לא יוצא מהתוכנית
+if __name__ == "__main__":
+    # רק אם הקובץ נטען ישירות
+    validate_required_env_vars()

@@ -48,7 +48,7 @@ class BotMessages:
         return f"""✅ נשמר!
 
 🏪 {vendor}
-💰 {amount:,.0f} ₪
+💰 {amount:,.0f} ש״ח
 {emoji} {category}"""
 
     @staticmethod
@@ -63,7 +63,7 @@ class BotMessages:
         base_msg = f"""🔄 עודכן!
 
 🏪 {vendor}
-💰 {amount:,.0f} ₪
+💰 {amount:,.0f} ש״ח
 {emoji} {category}"""
         
         if changed_field:
@@ -78,7 +78,7 @@ class BotMessages:
         amount = expense_data.get('amount', 0)
         
         return f"""🗑️ נמחק!
-{vendor} - {amount:,.0f} ₪"""
+{vendor} - {amount:,.0f} ש״ח"""
 
     @staticmethod
     def image_unclear_request() -> str:
@@ -97,7 +97,7 @@ class BotMessages:
         return f"""✅ נשמר!
 
 🏪 {vendor}
-💰 {amount:,.0f} ₪
+💰 {amount:,.0f} ש״ח
 📋 אחר
 
 💡 אפשר לשנות פרטים בדשבורד אם צריך"""
@@ -135,11 +135,8 @@ class BotMessages:
 
     @staticmethod
     def group_not_found() -> str:
-    """הודעה כשקבוצה לא נמצאת במערכת"""
-    # אל תשלח כלום! רק החזר None או מחרוזת ריקה
-    return None 
-
-צרו קשר עם המנהל כדי להוסיף אתכם למערכת ✨"""
+        """הודעה כשקבוצה לא נמצאת במערכת - לא שולח כלום"""
+        return ""
 
     @staticmethod
     def weekly_summary(summary_data: Dict) -> str:
@@ -154,7 +151,7 @@ class BotMessages:
             # שבוע ללא הוצאות
             return f"""📊 שבוע רגוע ללא הוצאות חדשות
 
-💰 סה"כ עד כה: {total_overall:,.0f} ₪
+💰 סה"כ עד כה: {total_overall:,.0f} ש״ח
 ⏰ נותרו {days_left} יום לחתונה
 
 שבוע טוב! 😊"""
@@ -163,7 +160,7 @@ class BotMessages:
         categories_text = ""
         for category, amount in sorted(categories.items(), key=lambda x: x[1], reverse=True):
             emoji = WEDDING_CATEGORIES.get(category, "📋")
-            categories_text += f"{emoji} {category}: {amount:,.0f} ₪\n"
+            categories_text += f"{emoji} {category}: {amount:,.0f} ש״ח\n"
         
         # הודעת סטטוס תקציב
         budget_status = ""
@@ -181,8 +178,8 @@ class BotMessages:
         
         return f"""📊 סיכום השבוע שעבר
 
-💰 הוצאות השבוע: {total_week:,.0f} ₪
-📈 סה"כ עד כה: {total_overall:,.0f} ₪
+💰 הוצאות השבוע: {total_week:,.0f} ש״ח
+📈 סה"כ עד כה: {total_overall:,.0f} ש״ח
 
 {categories_text.strip()}
 
@@ -198,7 +195,7 @@ class BotMessages:
             return f"""💡 זיהיתי שזה התשלום השני ל{vendor}
 
 התשלום הראשון עבר להיות מקדמה, וזה התשלום הסופי.
-הסכומים מחושבים נכון בדשבورד! ✅"""
+הסכומים מחושבים נכון בדשבורד! ✅"""
         else:
             return f"""💡 זיהיתי מספר תשלומים ל{vendor}
 
@@ -213,7 +210,7 @@ class BotMessages:
         if percentage >= 90:
             return f"""🚨 התראת תקציב!
 
-הוצאתם כבר {current_amount:,.0f} ₪ מתוך {budget:,.0f} ₪
+הוצאתם כבר {current_amount:,.0f} ש״ח מתוך {budget:,.0f} ש״ח
 ({percentage:.0f}% מהתקציב)
 
 כדאי לבדוק את הדשבורד ולראות איפה אפשר לחסוך 💡"""
@@ -221,7 +218,7 @@ class BotMessages:
         elif percentage >= 75:
             return f"""⚠️ עדכון תקציב
 
-הוצאתם {current_amount:,.0f} ₪ מתוך {budget:,.0f} ₪
+הוצאתם {current_amount:,.0f} ש״ח מתוך {budget:,.0f} ש״ח
 ({percentage:.0f}% מהתקציב)
 
 עדיין בטווח הבטוח! 💪"""
@@ -235,7 +232,7 @@ class BotMessages:
         
         # חיפוש סכום ושם ספק
         amount_patterns = [
-            r'(\d+(?:\.\d+)?)\s*(?:ש"ח|₪|שקל|שקלים)',
+            r'(\d+(?:\.\d+)?)\s*(?:ש"ח|שח|שקל|שקלים)',
             r'(?:שילמתי|עלה|עולה|קנה|קיבל|שילמנו)\s*(\d+(?:\.\d+)?)',
             r'(\d+(?:\.\d+)?)\s*(?:לספק|למקום|ל)',
         ]
@@ -299,7 +296,7 @@ class BotMessages:
             except:
                 pass
         
-        return f"{emoji} {vendor} - {amount:,.0f} ₪{date_display}"
+        return f"{emoji} {vendor} - {amount:,.0f} ש״ח{date_display}"
 
     @staticmethod
     def get_category_emoji(category: str) -> str:

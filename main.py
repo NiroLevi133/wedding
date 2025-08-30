@@ -1,8 +1,33 @@
 import os
+import sys
 import logging
 import asyncio
+import httpx
 from datetime import datetime
 from typing import Dict
+
+# בדיקת Python version
+if sys.version_info < (3, 8):
+    print("Python 3.8+ required")
+    sys.exit(1)
+
+# וולידציה של משתני סביבה קריטיים בטעינה
+CRITICAL_ENV_VARS = [
+    "GREENAPI_INSTANCE_ID",
+    "GREENAPI_TOKEN", 
+    "GSHEETS_SPREADSHEET_ID",
+    "GOOGLE_CREDENTIALS_JSON"
+]
+
+missing_vars = []
+for var in CRITICAL_ENV_VARS:
+    if not os.getenv(var):
+        missing_vars.append(var)
+
+if missing_vars:
+    print(f"❌ Missing critical environment variables: {', '.join(missing_vars)}")
+    print("The application cannot start without these variables.")
+    sys.exit(1)
 
 from fastapi import FastAPI, Request, HTTPException, Depends
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -44,120 +69,21 @@ app.add_middleware(
 )
 
 # Initialize components
-db = DatabaseManager()
-ai = AIAnalyzer()
-webhook_handler = WebhookHandler()
-messages = BotMessages()
-user_dashboard = UserDashboard(db)
-admin_panel = AdminPanel(db)
+try:
+    db = DatabaseManager()
+    ai = AIAnalyzer()
+    webhook_handler = WebhookHandler()
+    messages = BotMessages()
+    user_dashboard = UserDashboard(db)
+    admin_panel = AdminPanel(db)
+    print("✅ All components initialized successfully")
+except Exception as e:
+    print(f"❌ Failed to initialize components: {e}")
+    sys.exit(1)
 
 # Global state for admin authentication
 ADMIN_SESSION_TOKEN = None
 
-
-
-def debug_config():
-    """
-    פונקציית דיבאג לבדיקת משתני סביבה
-    """
-    print("=" * 50)
-    print("🔍 DEBUG: בדיקת משתני סביבה")
-    print("=" * 50)
-    
-    # רשימת כל המשתנים הנדרשים
-    required_vars = [
-        "GREENAPI_INSTANCE_ID",
-        "GREENAPI_TOKEN", 
-        "OPENAI_API_KEY",
-        "GSHEETS_SPREADSHEET_ID",
-        "GOOGLE_CREDENTIALS_JSON",
-        "DEFAULT_CURRENCY",
-        "DEFAULT_TIMEZONE",
-        "WEBHOOK_SHARED_SECRET",
-        "ALLOWED_PHONES",
-        "PORT",
-        "DEBUG"
-    ]
-    
-    print("📋 בדיקת משתנים בסיסיים:")
-    for var in required_vars:
-        value = os.getenv(var)
-        if value:
-            # הצג רק חלק מהערך למשתנים רגישים
-            if var in ["GREENAPI_TOKEN", "OPENAI_API_KEY", "WEBHOOK_SHARED_SECRET"]:
-                display_value = f"{value[:8]}...{value[-4:]}" if len(value) > 12 else "***"
-            elif var == "GOOGLE_CREDENTIALS_JSON":
-                try:
-                    import json
-                    json_data = json.loads(value)
-                    display_value = f"JSON תקין - project_id: {json_data.get('project_id', 'לא נמצא')}"
-                except json.JSONDecodeError:
-                    display_value = "❌ JSON לא תקין!"
-            else:
-                display_value = value
-            print(f"  ✅ {var}: {display_value}")
-        else:
-            print(f"  ❌ {var}: חסר!")
-    
-    print("\n" + "=" * 30)
-    print("🔧 ערכי config.py:")
-    print("=" * 30)
-    
-    # בדוק ערכים מהקובץ config.py
-    try:
-        from config import (
-            GREENAPI_INSTANCE_ID, GREENAPI_TOKEN, OPENAI_API_KEY,
-            GSHEETS_SPREADSHEET_ID, DEFAULT_CURRENCY, DEFAULT_TIMEZONE,
-            WEBHOOK_SHARED_SECRET, ALLOWED_PHONES, PORT, DEBUG,
-            validate_config
-        )
-        
-        print(f"GREENAPI_INSTANCE_ID: {'✅ מוגדר' if GREENAPI_INSTANCE_ID else '❌ ריק'}")
-        print(f"GREENAPI_TOKEN: {'✅ מוגדר' if GREENAPI_TOKEN else '❌ ריק'}")
-        print(f"OPENAI_API_KEY: {'✅ מוגדר' if OPENAI_API_KEY else '❌ ריק'}")
-        print(f"GSHEETS_SPREADSHEET_ID: {'✅ מוגדר' if GSHEETS_SPREADSHEET_ID else '❌ ריק'}")
-        print(f"WEBHOOK_SHARED_SECRET: {'✅ מוגדר' if WEBHOOK_SHARED_SECRET else '❌ ריק'}")
-        print(f"DEFAULT_CURRENCY: {DEFAULT_CURRENCY}")
-        print(f"DEFAULT_TIMEZONE: {DEFAULT_TIMEZONE}")
-        print(f"ALLOWED_PHONES: {len(ALLOWED_PHONES)} טלפונים")
-        print(f"PORT: {PORT}")
-        print(f"DEBUG: {DEBUG}")
-        
-        # הרץ בדיקת תקינות
-        print(f"\n🔍 תוצאות validate_config():")
-        validation_results = validate_config()
-        for service, is_valid in validation_results.items():
-            status = "✅" if is_valid else "❌"
-            print(f"  {status} {service}: {'תקין' if is_valid else 'חסר/שגוי'}")
-            
-    except ImportError as e:
-        print(f"❌ שגיאה בייבוא config.py: {e}")
-    except Exception as e:
-        print(f"❌ שגיאה כללית: {e}")
-    
-    print("\n" + "=" * 30)
-    print("🌐 בדיקת חיבור לפורט:")
-    print("=" * 30)
-    print(f"PORT מ-environment: {os.getenv('PORT', 'לא מוגדר')}")
-    print(f"PORT מ-config: {PORT}")
-    
-    # בדוק אם השרת מקשיב על הפורט הנכון
-    import socket
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        result = sock.connect_ex(('0.0.0.0', PORT))
-        if result == 0:
-            print(f"✅ פורט {PORT} זמין")
-        else:
-            print(f"❌ פורט {PORT} לא זמין")
-        sock.close()
-    except Exception as e:
-        print(f"❌ שגיאה בבדיקת פורט: {e}")
-    
-    print("=" * 50)
-    print("סיום דיבאג")
-    print("=" * 50)
-    
 def verify_webhook_signature(request: Request) -> bool:
     """Verify webhook signature for security"""
     if not WEBHOOK_SHARED_SECRET:
@@ -322,7 +248,8 @@ async def admin_authenticate(request: Request):
         password = data.get("password", "")
         
         # Simple password check (in production, use proper hashing)
-        if password == os.getenv("ADMIN_PASSWORD", "admin123"):
+        admin_password = os.getenv("ADMIN_PASSWORD", "admin123")
+        if password == admin_password:
             # Generate session token
             import secrets
             ADMIN_SESSION_TOKEN = secrets.token_urlsafe(32)
@@ -434,7 +361,7 @@ async def create_whatsapp_group(phone1: str, phone2: str, wedding_date: str = No
             except:
                 pass
         
-        group_name = f"💒 הוצאות החתונה{date_str}"
+        group_name = f"הוצאות החתונה{date_str}"
         
         # רשימת משתתפים (בוט + שני המספרים)
         participants = [
@@ -658,6 +585,7 @@ async def cleanup_task():
 @app.on_event("startup")
 async def startup_event():
     """Application startup"""
+    print("🚀 Starting Wedding Expenses Bot...")
     logger.info("Starting Wedding Expenses Bot...")
     
     try:
@@ -666,27 +594,41 @@ async def startup_event():
         logger.info(f"Configuration checks: {config_checks}")
         
         if not all(config_checks.values()):
-            logger.warning("Some configuration checks failed - system may not work properly")
+            logger.error("Critical configuration missing - cannot continue")
+            missing_services = [k for k, v in config_checks.items() if not v]
+            print(f"❌ Missing services: {', '.join(missing_services)}")
+            raise SystemExit("Critical configuration missing")
         
         # Test database connection
         db_health = db.health_check()
         logger.info(f"Database health: {db_health}")
         
-        # Test AI connection
+        if not db_health.get("sheets_connection", False):
+            logger.error("Cannot connect to Google Sheets")
+            raise SystemExit("Google Sheets connection failed")
+        
+        # Test AI connection (warning only)
         ai_health = ai.health_check()
         logger.info(f"AI health: {ai_health}")
         
-        # Start background tasks
+        if not ai_health.get("openai_configured", False):
+            logger.warning("OpenAI not configured - AI features disabled")
+        
+        # Start background tasks only if not in debug
         if not DEBUG:
             asyncio.create_task(weekly_summary_task())
             asyncio.create_task(cleanup_task())
             logger.info("Background tasks started")
         
+        print("✅ Wedding Expenses Bot started successfully!")
         logger.info("Wedding Expenses Bot started successfully!")
         
+    except SystemExit:
+        raise
     except Exception as e:
         logger.error(f"Startup failed: {e}")
-        raise
+        print(f"❌ Startup failed: {e}")
+        raise SystemExit(f"Startup failed: {e}")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -716,7 +658,7 @@ async def internal_error_handler(request: Request, exc: Exception):
 
 if DEBUG:
     @app.get("/debug/config")
-    async def debug_config():
+    async def debug_config_endpoint():
         """Debug configuration (dev only)"""
         return {
             "green_api_configured": bool(GREENAPI_INSTANCE_ID and GREENAPI_TOKEN),
@@ -744,7 +686,9 @@ if DEBUG:
 if __name__ == "__main__":
     import uvicorn
     
+    print(f"🌐 Starting server on port {PORT}")
     logger.info(f"Starting server on port {PORT}")
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

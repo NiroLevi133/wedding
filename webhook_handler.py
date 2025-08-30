@@ -26,6 +26,33 @@ class WebhookHandler:
         # מעקב אחר הודעות אחרונות לעדכונים
         self.last_expenses_by_group = {}
     
+    def _is_authorized_phone(self, sender_data: Dict) -> bool:
+        """בודק אם המשתמש מורשה לקבל הודעות"""
+        try:
+            phone = sender_data.get("sender", "")
+            if not phone:
+                return False
+            
+            # אם אין רשימת טלפונים מורשים - מאשר הכל (למטרות בדיקה)
+            if not ALLOWED_PHONES:
+                logger.warning("No ALLOWED_PHONES configured - allowing all users (not recommended for production)")
+                return True
+            
+            # נרמול מספר טלפון
+            clean_phone = phone.replace("@c.us", "").replace("-", "").replace(" ", "")
+            
+            # בדיקה מול רשימת הטלפונים המורשים
+            for allowed in ALLOWED_PHONES:
+                clean_allowed = allowed.replace("+", "").replace("-", "").replace(" ", "")
+                if clean_allowed in clean_phone or clean_phone in clean_allowed:
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Phone authorization check failed: {e}")
+            return False
+    
     async def process_webhook(self, payload: Dict) -> Dict[str, any]:
         """מעבד webhook נכנס מWhatsApp"""
         try:
@@ -40,10 +67,16 @@ class WebhookHandler:
                 logger.warning("No chat_id in webhook")
                 return {"status": "ignored", "reason": "no_chat_id"}
             
+            # בדיקת הרשאה - אם לא מורשה, התעלם בדממה
+            if not self._is_authorized_phone(sender_data):
+                logger.info(f"Unauthorized phone attempted to use bot: {sender_data.get('sender', 'unknown')}")
+                return {"status": "unauthorized", "reason": "phone_not_allowed"}
+            
             # בדיקת קבוצה פעילה
             group_info = await self._get_group_info(chat_id)
             if not group_info:
-                await self._send_message(chat_id, self.messages.group_not_found())
+                # לא שולח הודעה - פשוט מתעלם
+                logger.info(f"Message from unregistered group: {chat_id}")
                 return {"status": "group_not_found", "chat_id": chat_id}
             
             logger.info(f"Processing {message_type} from group {group_info['whatsapp_group_id']}")
@@ -169,7 +202,7 @@ class WebhookHandler:
             if budget_match:
                 budget = float(budget_match.group(1).replace(',', ''))
                 # כאן צריך לעדכן בדאטה בייס את התקציב
-                await self._send_message(chat_id, f"תקציב עודכן ל-{budget:,.0f} ₪ ✅")
+                await self._send_message(chat_id, f"תקציב עודכן ל-{budget:,.0f} ש״ח")
                 return True
         
         # הגדרת תאריך חתונה (אם עדיין לא הוגדר)
@@ -179,7 +212,7 @@ class WebhookHandler:
                 day, month, year = date_match.groups()
                 wedding_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
                 # כאן צריך לעדכן בדאטה בייס את התאריך
-                await self._send_message(chat_id, f"תאריך החתונה עודכן ל-{day}/{month}/{year} ✅")
+                await self._send_message(chat_id, f"תאריך החתונה עודכן ל-{day}/{month}/{year}")
                 return True
         
         return False
@@ -223,53 +256,6 @@ class WebhookHandler:
                         updated_expense['category'] = new_value
                     else:
                         return False
-                
-                # שמירת העדכון
-                success = await self._update_expense(updated_expense)
-                if success:
-                    message = self.messages.receipt_updated_success(updated_expense, update_type)
-                    await self._send_message(chat_id, message)
-                    
-                    # עדכון cache
-                    self.last_expenses_by_group[group_info["whatsapp_group_id"]] = updated_expense
-                    return True
-            
-        except Exception as e:
-            logger.error(f"Update request handling failed: {e}")
-        
-        return False
-    
-    def _is_image_unclear(self, receipt_data: Dict) -> bool:
-        """בודק אם התמונה לא ברורה (חסרים 2+ שדות חשובים)"""
-        important_fields = ['vendor', 'amount']
-        missing_count = 0
-        
-        for field in important_fields:
-            value = receipt_data.get(field)
-            if not value or (field == 'amount' and value == 0):
-                missing_count += 1
-        
-        return missing_count >= 2
-    
-    async def _enhance_vendor_data(self, receipt_data: Dict, group_id: str) -> Dict:
-        """משפר נתוני ספק עם למידה מהדאטה בייס"""
-        vendor = receipt_data.get('vendor')
-        if not vendor:
-            return receipt_data
-        
-        # חיפוש קטגוריה קיימת
-        existing_category = self.db.get_vendor_category(vendor)
-        
-        if existing_category and existing_category in CATEGORY_LIST:
-            receipt_data['category'] = existing_category
-            receipt_data['confidence'] = min(95, receipt_data.get('confidence', 80) + 15)
-        else:
-            # ספק חדש - שיפור עם AI
-            enhanced = self.ai.enhance_vendor_with_category(vendor, receipt_data.get('category'))
-            
-            if enhanced.get('confidence', 0) > 70:
-                receipt_data['category'] = enhanced['category']
-                receipt_data['confidence'] = enhanced['confidence']
                 
                 # שמירה למידה עתידית
                 self.db.save_vendor_category(
@@ -452,6 +438,10 @@ class WebhookHandler:
     async def _send_message(self, chat_id: str, message: str) -> bool:
         """שולח הודעה בWhatsApp"""
         try:
+            # אם ההודעה ריקה או None - אל תשלח כלום
+            if not message or message.strip() == "":
+                return True
+            
             url = f"https://api.green-api.com/waInstance{GREENAPI_INSTANCE_ID}/sendMessage/{GREENAPI_TOKEN}"
             
             payload = {
@@ -578,4 +568,51 @@ class WebhookHandler:
                 'categories': {},
                 'days_to_wedding': 0,
                 'budget_percentage': 0
-            }
+            }ת העדכון
+                success = await self._update_expense(updated_expense)
+                if success:
+                    message = self.messages.receipt_updated_success(updated_expense, update_type)
+                    await self._send_message(chat_id, message)
+                    
+                    # עדכון cache
+                    self.last_expenses_by_group[group_info["whatsapp_group_id"]] = updated_expense
+                    return True
+            
+        except Exception as e:
+            logger.error(f"Update request handling failed: {e}")
+        
+        return False
+    
+    def _is_image_unclear(self, receipt_data: Dict) -> bool:
+        """בודק אם התמונה לא ברורה (חסרים 2+ שדות חשובים)"""
+        important_fields = ['vendor', 'amount']
+        missing_count = 0
+        
+        for field in important_fields:
+            value = receipt_data.get(field)
+            if not value or (field == 'amount' and value == 0):
+                missing_count += 1
+        
+        return missing_count >= 2
+    
+    async def _enhance_vendor_data(self, receipt_data: Dict, group_id: str) -> Dict:
+        """משפר נתוני ספק עם למידה מהדאטה בייס"""
+        vendor = receipt_data.get('vendor')
+        if not vendor:
+            return receipt_data
+        
+        # חיפוש קטגוריה קיימת
+        existing_category = self.db.get_vendor_category(vendor)
+        
+        if existing_category and existing_category in CATEGORY_LIST:
+            receipt_data['category'] = existing_category
+            receipt_data['confidence'] = min(95, receipt_data.get('confidence', 80) + 15)
+        else:
+            # ספק חדש - שיפור עם AI
+            enhanced = self.ai.enhance_vendor_with_category(vendor, receipt_data.get('category'))
+            
+            if enhanced.get('confidence', 0) > 70:
+                receipt_data['category'] = enhanced['category']
+                receipt_data['confidence'] = enhanced['confidence']
+                
+                # שמיר
