@@ -57,6 +57,7 @@ class WebhookHandler:
         """מעבד webhook נכנס מWhatsApp"""
         try:
             # חילוץ נתונים בסיסיים
+            print("🔍 FULL WEBHOOK PAYLOAD:", json.dumps(payload, indent=2, ensure_ascii=False))
             message_data = payload.get("messageData", {})
             sender_data = payload.get("senderData", {})
             
@@ -217,6 +218,7 @@ class WebhookHandler:
         
         return False
     
+
     async def _handle_update_request(self, chat_id: str, text: str, recent_expense: Dict, group_info: Dict) -> bool:
         """מטפל בבקשות עדכון"""
         try:
@@ -616,3 +618,4 @@ class WebhookHandler:
                 'days_to_wedding': 0,
                 'budget_percentage': 0
             }
+            
