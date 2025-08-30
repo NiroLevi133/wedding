@@ -686,13 +686,18 @@ if DEBUG:
 if __name__ == "__main__":
     import uvicorn
     
-    print(f"🌐 Starting server on port {PORT}")
-    logger.info(f"Starting server on port {PORT}")
+    # קבלת פורט מ-Cloud Run
+    port = int(os.getenv("PORT", 8080))
     
+    print(f"🚀 Starting server on port {port}")
+    
+    # הפעלה עם הגדרות Cloud Run
     uvicorn.run(
-        "main:app",
-        host="0.0.0.0",
-        port=PORT,
-        reload=DEBUG,
-        log_level="debug" if DEBUG else "info"
+        app,  # לא "main:app" כי אנחנו כבר בתוך main
+        host="0.0.0.0",  # חשוב! לא localhost
+        port=port,
+        timeout_keep_alive=120,
+        loop="asyncio",
+        access_log=False,  # למנוע לוגים מיותרים
+        log_level="info"
     )

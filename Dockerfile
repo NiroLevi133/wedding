@@ -1,4 +1,4 @@
-# Use Python 3.11 slim image for better performance
+# Use Python 3.11 slim image
 FROM python:3.11-slim
 
 # Set working directory
@@ -30,12 +30,8 @@ RUN useradd -r -s /bin/false appuser && \
     chown -R appuser:appuser /app
 USER appuser
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-8080}/health || exit 1
+# Expose port (Cloud Run will set this)
+EXPOSE $PORT
 
-# Expose port (Cloud Run uses PORT env variable)
-EXPOSE ${PORT:-8080}
-
-# Run the application
-CMD exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1
+# Use exec form for proper signal handling
+CMD ["python", "main.py"]

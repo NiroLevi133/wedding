@@ -257,6 +257,53 @@ class WebhookHandler:
                     else:
                         return False
                 
+                # שמירת העדכון
+                success = await self._update_expense(updated_expense)
+                if success:
+                    message = self.messages.receipt_updated_success(updated_expense, update_type)
+                    await self._send_message(chat_id, message)
+                    
+                    # עדכון cache
+                    self.last_expenses_by_group[group_info["whatsapp_group_id"]] = updated_expense
+                    return True
+            
+        except Exception as e:
+            logger.error(f"Update request handling failed: {e}")
+        
+        return False
+    
+    def _is_image_unclear(self, receipt_data: Dict) -> bool:
+        """בודק אם התמונה לא ברורה (חסרים 2+ שדות חשובים)"""
+        important_fields = ['vendor', 'amount']
+        missing_count = 0
+        
+        for field in important_fields:
+            value = receipt_data.get(field)
+            if not value or (field == 'amount' and value == 0):
+                missing_count += 1
+        
+        return missing_count >= 2
+    
+    async def _enhance_vendor_data(self, receipt_data: Dict, group_id: str) -> Dict:
+        """משפר נתוני ספק עם למידה מהדאטה בייס"""
+        vendor = receipt_data.get('vendor')
+        if not vendor:
+            return receipt_data
+        
+        # חיפוש קטגוריה קיימת
+        existing_category = self.db.get_vendor_category(vendor)
+        
+        if existing_category and existing_category in CATEGORY_LIST:
+            receipt_data['category'] = existing_category
+            receipt_data['confidence'] = min(95, receipt_data.get('confidence', 80) + 15)
+        else:
+            # ספק חדש - שיפור עם AI
+            enhanced = self.ai.enhance_vendor_with_category(vendor, receipt_data.get('category'))
+            
+            if enhanced.get('confidence', 0) > 70:
+                receipt_data['category'] = enhanced['category']
+                receipt_data['confidence'] = enhanced['confidence']
+                
                 # שמירה למידה עתידית
                 self.db.save_vendor_category(
                     vendor, 
@@ -568,51 +615,4 @@ class WebhookHandler:
                 'categories': {},
                 'days_to_wedding': 0,
                 'budget_percentage': 0
-            }ת העדכון
-                success = await self._update_expense(updated_expense)
-                if success:
-                    message = self.messages.receipt_updated_success(updated_expense, update_type)
-                    await self._send_message(chat_id, message)
-                    
-                    # עדכון cache
-                    self.last_expenses_by_group[group_info["whatsapp_group_id"]] = updated_expense
-                    return True
-            
-        except Exception as e:
-            logger.error(f"Update request handling failed: {e}")
-        
-        return False
-    
-    def _is_image_unclear(self, receipt_data: Dict) -> bool:
-        """בודק אם התמונה לא ברורה (חסרים 2+ שדות חשובים)"""
-        important_fields = ['vendor', 'amount']
-        missing_count = 0
-        
-        for field in important_fields:
-            value = receipt_data.get(field)
-            if not value or (field == 'amount' and value == 0):
-                missing_count += 1
-        
-        return missing_count >= 2
-    
-    async def _enhance_vendor_data(self, receipt_data: Dict, group_id: str) -> Dict:
-        """משפר נתוני ספק עם למידה מהדאטה בייס"""
-        vendor = receipt_data.get('vendor')
-        if not vendor:
-            return receipt_data
-        
-        # חיפוש קטגוריה קיימת
-        existing_category = self.db.get_vendor_category(vendor)
-        
-        if existing_category and existing_category in CATEGORY_LIST:
-            receipt_data['category'] = existing_category
-            receipt_data['confidence'] = min(95, receipt_data.get('confidence', 80) + 15)
-        else:
-            # ספק חדש - שיפור עם AI
-            enhanced = self.ai.enhance_vendor_with_category(vendor, receipt_data.get('category'))
-            
-            if enhanced.get('confidence', 0) > 70:
-                receipt_data['category'] = enhanced['category']
-                receipt_data['confidence'] = enhanced['confidence']
-                
-                # שמיר
+            }
