@@ -110,10 +110,15 @@ class DatabaseManager:
             expense_data.setdefault('created_at', current_time)
             expense_data.setdefault('status', 'active')
             expense_data.setdefault('needs_review', False)
+            expense_data.setdefault('last_updated', '')
             
-            # יצירת שורה לפי סדר הכותרות
+            # יצירת שורה לפי סדר הכותרות (כולל last_updated)
             row_values = []
-            for header in EXPENSE_HEADERS:
+            headers = EXPENSE_HEADERS
+            if 'last_updated' not in headers:
+                headers = headers + ['last_updated']
+                
+            for header in headers:
                 value = expense_data.get(header, '')
                 row_values.append(str(value) if value is not None else '')
             
@@ -141,11 +146,15 @@ class DatabaseManager:
             expenses = []
             
             for row in data_rows:
-                if len(row) < len(EXPENSE_HEADERS):
-                    # השלם שורות חסרות
-                    row.extend([''] * (len(EXPENSE_HEADERS) - len(row)))
+                # וודא שיש מספיק עמודות
+                headers = EXPENSE_HEADERS
+                if 'last_updated' not in headers:
+                    headers = headers + ['last_updated']
+                    
+                if len(row) < len(headers):
+                    row.extend([''] * (len(headers) - len(row)))
                 
-                expense = dict(zip(EXPENSE_HEADERS, row))
+                expense = dict(zip(headers, row))
                 
                 # סנן לפי קבוצה
                 if expense.get('group_id') == group_id:
@@ -162,40 +171,69 @@ class DatabaseManager:
             logger.error(f"Failed to get expenses for group {group_id}: {e}")
             return []
     
-    def update_expense_status(self, expense_id: str, status: str, deleted_at: Optional[str] = None) -> bool:
-        """מעדכן סטטוס הוצאה"""
+    def update_expense(self, expense_id: str, updates: Dict) -> bool:
+        """מעדכן הוצאה קיימת עם כל השדות"""
         try:
             rows = self._read_sheet_range(EXPENSES_SHEET)
             
             if not rows or len(rows) < 2:
                 return False
             
-            # מחפש את השורה
             headers = rows[0]
+            # וודא שיש עמודת last_updated
+            if 'last_updated' not in headers:
+                headers.append('last_updated')
+                
             data_rows = rows[1:]
             
             for i, row in enumerate(data_rows):
-                if len(row) > 0 and row[0] == expense_id:  # expense_id בעמודה הראשונה
-                    # עדכן סטטוס
-                    if len(row) < len(EXPENSE_HEADERS):
-                        row.extend([''] * (len(EXPENSE_HEADERS) - len(row)))
+                if len(row) > 0 and row[0] == expense_id:
+                    # הוסף timestamp לעדכון
+                    updates['last_updated'] = self._get_current_timestamp()
                     
-                    # מעדכן לפי אינדקס העמודות
-                    status_index = EXPENSE_HEADERS.index('status')
-                    row[status_index] = status
+                    # וודא שהשורה מספיק ארוכה
+                    if len(row) < len(headers):
+                        row.extend([''] * (len(headers) - len(row)))
                     
-                    if deleted_at and 'deleted_at' in EXPENSE_HEADERS:
-                        deleted_index = EXPENSE_HEADERS.index('deleted_at')
-                        row[deleted_index] = deleted_at
+                    # עדכן את כל השדות הרלוונטיים
+                    for field, value in updates.items():
+                        if field in headers:
+                            field_index = headers.index(field)
+                            row[field_index] = str(value) if value is not None else ''
                     
-                    # מעדכן בגיליון
-                    row_number = i + 2  # +1 לכותרת +1 לאינדקס מ-1
-                    range_name = f"expenses!A{row_number}:L{row_number}"
+                    # עדכון בגיליון
+                    row_number = i + 2
+                    range_name = f"expenses!A{row_number}:M{row_number}"  # כולל עמודה M ל-last_updated
                     
                     return self._update_sheet_row(range_name, row)
             
-            logger.warning(f"Expense {expense_id} not found for status update")
+            logger.warning(f"Expense {expense_id} not found for update")
             return False
+            
+        except Exception as e:
+            logger.error(f"Failed to update expense: {e}")
+            return False
+    
+    def delete_expense(self, expense_id: str) -> bool:
+        """מוחק הוצאה (מעדכן סטטוס ל-deleted)"""
+        try:
+            updates = {
+                'status': 'deleted',
+                'deleted_at': self._get_current_timestamp()
+            }
+            return self.update_expense(expense_id, updates)
+            
+        except Exception as e:
+            logger.error(f"Failed to delete expense: {e}")
+            return False
+    
+    def update_expense_status(self, expense_id: str, status: str, deleted_at: Optional[str] = None) -> bool:
+        """מעדכן סטטוס הוצאה"""
+        try:
+            updates = {'status': status}
+            if deleted_at:
+                updates['deleted_at'] = deleted_at
+            return self.update_expense(expense_id, updates)
             
         except Exception as e:
             logger.error(f"Failed to update expense status: {e}")
@@ -257,6 +295,37 @@ class DatabaseManager:
         except Exception as e:
             logger.error(f"Failed to get active couples: {e}")
             return []
+    
+    def update_couple_field(self, group_id: str, field: str, value: str) -> bool:
+        """מעדכן שדה בודד של זוג"""
+        try:
+            rows = self._read_sheet_range(COUPLES_SHEET)
+            
+            if not rows or len(rows) < 2:
+                return False
+            
+            headers = rows[0]
+            data_rows = rows[1:]
+            
+            for i, row in enumerate(data_rows):
+                if len(row) > 2 and row[2] == group_id:  # whatsapp_group_id בעמודה 3
+                    if field in COUPLES_HEADERS:
+                        field_index = COUPLES_HEADERS.index(field)
+                        if len(row) <= field_index:
+                            row.extend([''] * (field_index + 1 - len(row)))
+                        row[field_index] = str(value)
+                        
+                        # עדכון בגיליון
+                        row_number = i + 2
+                        range_name = f"couples!A{row_number}:G{row_number}"
+                        
+                        return self._update_sheet_row(range_name, row)
+            
+            return False
+            
+        except Exception as e:
+            logger.error(f"Failed to update couple field: {e}")
+            return False
     
     # === ספקים ===
     
@@ -354,47 +423,16 @@ class DatabaseManager:
             # עדכן כל התשלומים חוץ מהאחרון למקדמות
             for i, expense in enumerate(expenses[:-1]):
                 payment_type = f"advance_{i+1}" if len(expenses) > 2 else "advance"
-                self._update_expense_payment_type(expense['expense_id'], payment_type)
+                self.update_expense(expense['expense_id'], {'payment_type': payment_type})
             
             # האחרון תמיד סופי
-            self._update_expense_payment_type(expenses[-1]['expense_id'], "final")
+            self.update_expense(expenses[-1]['expense_id'], {'payment_type': 'final'})
             
             logger.info(f"Updated payment types for {len(expenses)} expenses")
             return True
             
         except Exception as e:
             logger.error(f"Failed to update payment types: {e}")
-            return False
-    
-    def _update_expense_payment_type(self, expense_id: str, payment_type: str) -> bool:
-        """מעדכן סוג תשלום של הוצאה ספציפית"""
-        try:
-            rows = self._read_sheet_range(EXPENSES_SHEET)
-            
-            if not rows or len(rows) < 2:
-                return False
-            
-            data_rows = rows[1:]
-            
-            for i, row in enumerate(data_rows):
-                if len(row) > 0 and row[0] == expense_id:
-                    if len(row) < len(EXPENSE_HEADERS):
-                        row.extend([''] * (len(EXPENSE_HEADERS) - len(row)))
-                    
-                    # עדכן payment_type
-                    payment_type_index = EXPENSE_HEADERS.index('payment_type')
-                    row[payment_type_index] = payment_type
-                    
-                    # עדכן בגיליון
-                    row_number = i + 2
-                    range_name = f"expenses!A{row_number}:L{row_number}"
-                    
-                    return self._update_sheet_row(range_name, row)
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"Failed to update payment type: {e}")
             return False
     
     # === בדיקות תקינות ===

@@ -340,59 +340,95 @@ JSON נדרש:
     
     # === בדיקת זיהוי ספקים ===
     
+    # תיקונים ל-ai_analyzer.py
+# החלף את enhance_vendor_with_category:
+
     def enhance_vendor_with_category(self, vendor_name: str, existing_category: str = None) -> Dict:
-        """מנתח ספק ומציע קטגוריה מתאימה"""
+        """מנתח ספק ומציע קטגוריה מתאימה עם למידה משופרת"""
         
-        if not self.client:
-            return {'vendor_name': vendor_name, 'category': 'אחר', 'confidence': 0}
+        VENDOR_KEYWORDS = {
+            'אולם': ['אולם', 'גן אירועים', 'מתחם', 'אולמי', 'גני'],
+            'מזון': ['קייטרינג', 'מסעדה', 'שף', 'מטבח', 'אוכל', 'בר', 'משקאות', 'יין', 'עוגה', 'קונדיטור'],
+            'צילום': ['צלם', 'צילום', 'וידאו', 'סטודיו', 'סטילס', 'דרון', 'אלבום'],
+            'לבוש': ['שמלה', 'חליפה', 'בגדים', 'נעליים', 'חנות אופנה', 'בוטיק', 'חייט'],
+            'עיצוב': ['פרחים', 'עיצוב', 'דקורציה', 'קישוט', 'זר', 'סידור'],
+            'הדפסות': ['הזמנות', 'דפוס', 'הדפסה', 'גרפיקה', 'עיצוב גרפי'],
+            'אקססוריז': ['תכשיטים', 'טבעת', 'שעון', 'אקססוריז', 'מאקס', 'max', 'תיק'],
+            'מוזיקה': ['דיג׳יי', 'DJ', 'להקה', 'זמר', 'נגן', 'מוזיקה', 'הגברה'],
+            'הסעות': ['הסעה', 'אוטובוס', 'מונית', 'רכב', 'טיולים', 'נסיעות']
+        }
         
-        try:
-            prompt = f"""נתח את שם הספק הזה ותן קטגוריה מתאימה לחתונה:
+        vendor_lower = vendor_name.lower()
+        
+        for category, keywords in VENDOR_KEYWORDS.items():
+            for keyword in keywords:
+                if keyword.lower() in vendor_lower:
+                    return {
+                        'vendor_name': vendor_name,
+                        'category': category,
+                        'confidence': 95
+                    }
+        
+        KNOWN_VENDORS = {
+            'מאקס': 'אקססוריז',
+            'max': 'אקססוריז',
+            'זארה': 'לבוש',
+            'רמי לוי': 'מזון',
+            'שופרסל': 'מזון',
+            'איקאה': 'עיצוב'
+        }
+        
+        for vendor_key, category in KNOWN_VENDORS.items():
+            if vendor_key in vendor_lower:
+                return {
+                    'vendor_name': vendor_name,
+                    'category': category,
+                    'confidence': 90
+                }
+        
+        if self.client:
+            try:
+                prompt = f"""נתח את שם הספק וקבע קטגוריה לחתונה.
 
-שם הספק: "{vendor_name}"
+ספק: "{vendor_name}"
 
-קטגוריות זמינות: {', '.join(CATEGORY_LIST)}
+קטגוריות אפשריות: {', '.join(CATEGORY_LIST)}
+
+תן משקל למילים האלה:
+- מאקס/MAX = חנות אקססוריז
+- פרחים/זר = עיצוב
+- צלם/סטודיו = צילום
+- אולם/גן = אולם
 
 החזר JSON:
 {{
-  "vendor_name": "שם מנוקה של הספק",
-  "category": "קטגוריה מתאימה מהרשימה",
-  "confidence": מספר 0-100
-}}
+  "vendor_name": "{vendor_name}",
+  "category": "קטגוריה מהרשימה",
+  "confidence": 80-100
+}}"""
 
-דוגמאות:
-- "צלם רון" → category: "צילום"
-- "יקב ברקן" → category: "מזון" 
-- "גני אירועים דיאמונד" → category: "אולם"
+                response = self.client.chat.completions.create(
+                    model=AI_SETTINGS["model"],
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=150
+                )
+                
+                content = response.choices[0].message.content.strip()
+                result = self._parse_ai_response(content)
+                
+                if result.get('category') in CATEGORY_LIST:
+                    return result
+                    
+            except Exception as e:
+                logger.error(f"AI vendor categorization failed: {e}")
+        
+        return {
+            'vendor_name': vendor_name,
+            'category': existing_category or 'אחר',
+            'confidence': 50
+        }
 
-החזר רק JSON!"""
-
-            response = self.client.chat.completions.create(
-                model=AI_SETTINGS["model"],
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=150
-            )
-            
-            content = response.choices[0].message.content.strip()
-            result = self._parse_ai_response(content)
-            
-            # ולידציה
-            if not result.get('category') in CATEGORY_LIST:
-                result['category'] = 'אחר'
-            
-            if not result.get('confidence'):
-                result['confidence'] = 70
-            
-            logger.info(f"Enhanced vendor: {vendor_name} → {result.get('category')}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Vendor enhancement failed: {e}")
-            return {'vendor_name': vendor_name, 'category': 'אחר', 'confidence': 0}
-    
-    # === בדיקות מערכת ===
-    
     def health_check(self) -> Dict[str, bool]:
         """בודק שה-AI עובד"""
         checks = {
@@ -403,7 +439,6 @@ JSON נדרש:
         
         if self.client:
             try:
-                # בדיקה בסיסית
                 response = self.client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=[{"role": "user", "content": "Test"}],

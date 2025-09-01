@@ -37,48 +37,37 @@ class BotMessages:
 
     @staticmethod
     def receipt_saved_success(expense_data: Dict) -> str:
-        """הודעת אישור על קבלה שנשמרה"""
-        vendor = expense_data.get('vendor', 'ספק לא ידוע')
+        """הודעת אישור קצרה ויפה"""
+        vendor = expense_data.get('vendor', 'ספק')
         amount = expense_data.get('amount', 0)
         category = expense_data.get('category', 'אחר')
-        
-        # אמוג'י לקטגוריה
         emoji = WEDDING_CATEGORIES.get(category, "📋")
         
-        return f"""✅ נשמר!
-
-🏪 {vendor}
-💰 {amount:,.0f} ש״ח
-{emoji} {category}"""
+        return f"""✅ *נשמר!*
+{emoji} {vendor} • {amount:,.0f} ₪"""
 
     @staticmethod
     def receipt_updated_success(expense_data: Dict, changed_field: str = "") -> str:
-        """הודעת אישור על עדכון קבלה"""
-        vendor = expense_data.get('vendor', 'ספק לא ידוע')
+        """הודעת עדכון קצרה"""
+        vendor = expense_data.get('vendor', 'ספק')
         amount = expense_data.get('amount', 0)
-        category = expense_data.get('category', 'אחר')
         
-        emoji = WEDDING_CATEGORIES.get(category, "📋")
+        field_names = {
+            'amount': 'סכום',
+            'vendor': 'ספק',
+            'category': 'קטגוריה'
+        }
         
-        base_msg = f"""🔄 עודכן!
-
-🏪 {vendor}
-💰 {amount:,.0f} ש״ח
-{emoji} {category}"""
+        changed_text = f" ({field_names.get(changed_field, 'עודכן')})" if changed_field else ""
         
-        if changed_field:
-            base_msg += f" ← שונה"
-        
-        return base_msg
+        return f"""✏️ *עודכן{changed_text}*
+{vendor} • {amount:,.0f} ₪"""
 
     @staticmethod
     def receipt_deleted_success(expense_data: Dict) -> str:
-        """הודעת אישור על מחיקת קבלה"""
-        vendor = expense_data.get('vendor', 'ספק לא ידוע')
-        amount = expense_data.get('amount', 0)
-        
-        return f"""🗑️ נמחק!
-{vendor} - {amount:,.0f} ש״ח"""
+        """הודעת מחיקה קצרה"""
+        vendor = expense_data.get('vendor', 'ספק')
+        return f"🗑️ *נמחק* • {vendor}"
 
     @staticmethod
     def image_unclear_request() -> str:
@@ -93,14 +82,9 @@ class BotMessages:
 
     @staticmethod
     def manual_entry_saved(vendor: str, amount: float) -> str:
-        """אישור שמירה של הכנסה ידנית"""
-        return f"""✅ נשמר!
-
-🏪 {vendor}
-💰 {amount:,.0f} ש״ח
-📋 אחר
-
-💡 אפשר לשנות פרטים בדשבורד אם צריך"""
+        """אישור הכנסה ידנית"""
+        return f"""✅ *נוסף ידנית*
+{vendor} • {amount:,.0f} ₪"""
 
     @staticmethod
     def help_message() -> str:
@@ -137,6 +121,14 @@ class BotMessages:
     def group_not_found() -> str:
         """הודעה כשקבוצה לא נמצאת במערכת - לא שולח כלום"""
         return ""
+
+    @staticmethod
+    def advance_payment_detected(vendor: str, total_payments: int) -> str:
+        """הודעה קצרה על זיהוי מקדמה"""
+        if total_payments == 2:
+            return f"💡 זוהתה מקדמה ל{vendor}"
+        else:
+            return f"💡 {total_payments} תשלומים ל{vendor}"
 
     @staticmethod
     def weekly_summary(summary_data: Dict) -> str:
@@ -188,20 +180,6 @@ class BotMessages:
 
 שבוע טוב! 😊"""
 
-    @staticmethod  
-    def advance_payment_detected(vendor: str, total_payments: int) -> str:
-        """הודעה כשמזהה מקדמה"""
-        if total_payments == 2:
-            return f"""💡 זיהיתי שזה התשלום השני ל{vendor}
-
-התשלום הראשון עבר להיות מקדמה, וזה התשלום הסופי.
-הסכומים מחושבים נכון בדשבורד! ✅"""
-        else:
-            return f"""💡 זיהיתי מספר תשלומים ל{vendor}
-
-כל התשלומים חוץ מהאחרון הם מקדמות.
-הסכום הכולל מחושב נכון! ✅"""
-
     @staticmethod
     def budget_alert_warning(current_amount: float, budget: float) -> str:
         """התראת תקציב"""
@@ -227,52 +205,110 @@ class BotMessages:
 
     @staticmethod
     def parse_manual_entry(message: str) -> Optional[Dict]:
-        """מנתח הודעה להכנסה ידנית"""
+        """מנתח הודעה להכנסה ידנית משופרת"""
         import re
+        from datetime import datetime
         
-        # חיפוש סכום ושם ספק
+        # נרמול הטקסט
+        text = message.strip()
+        
+        # דפוסים לזיהוי סכום
         amount_patterns = [
-            r'(\d+(?:\.\d+)?)\s*(?:ש"ח|שח|שקל|שקלים)',
-            r'(?:שילמתי|עלה|עולה|קנה|קיבל|שילמנו)\s*(\d+(?:\.\d+)?)',
-            r'(\d+(?:\.\d+)?)\s*(?:לספק|למקום|ל)',
+            r'(\d+(?:,?\d{3})*(?:\.\d+)?)\s*(?:ש"ח|שח|שקל|שקלים|₪)',
+            r'(?:שילמתי|שילמנו|עלה|עולה|היה|עלות)\s+(\d+(?:,?\d{3})*(?:\.\d+)?)',
+            r'(\d+(?:,?\d{3})*(?:\.\d+)?)\s+(?:ל|עבור|בשביל)',
+            r'(\d{4,})',  # מספר של לפחות 4 ספרות
         ]
         
+        # דפוסים לזיהוי ספק
         vendor_patterns = [
-            r'(?:לספק|למקום|ל|אצל|ב)\s*([א-ת\s]+)',
-            r'([א-ת\s]+)\s*(?:עלה|עולה|קנה)',
-            r'(?:מ|מאת|של)\s*([א-ת\s]+)',
+            r'(?:ל|עבור|בשביל|אצל|ב|מ|של)\s*([א-ת\s]+?)(?:\s+|$)',
+            r'(צלם|אולם|דיג׳יי|קייטרינג|להקה|זמר|פרחים|שמלה|חליפה|עוגה|הזמנות)',
+            r'([א-ת]{2,}(?:\s+[א-ת]+)?)',  # כל מילה בעברית
         ]
+        
+        # דפוסים לזיהוי סוג תשלום
+        payment_type_keywords = {
+            'מקדמה': 'advance',
+            'קדימה': 'advance',
+            'ראשון': 'advance',
+            'סופי': 'final',
+            'אחרון': 'final',
+            'יתרה': 'final'
+        }
         
         amount = None
         vendor = None
+        payment_type = 'full'
+        category = 'אחר'
         
         # חיפוש סכום
         for pattern in amount_patterns:
-            match = re.search(pattern, message)
+            match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 try:
-                    amount = float(match.group(1))
-                    break
-                except ValueError:
+                    amount_str = match.group(1).replace(',', '')
+                    amount = float(amount_str)
+                    if amount > 0:
+                        break
+                except (ValueError, AttributeError):
                     continue
         
         # חיפוש ספק
         for pattern in vendor_patterns:
-            match = re.search(pattern, message)
+            match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                vendor = match.group(1).strip()
-                if len(vendor) > 2:
-                    break
+                potential_vendor = match.group(1).strip()
+                # ניקוי מילים מיותרות
+                stop_words = ['שילמתי', 'שילמנו', 'עלה', 'עולה', 'ש"ח', 'שקל', 'שקלים']
+                if potential_vendor and len(potential_vendor) > 1:
+                    if not any(word in potential_vendor for word in stop_words):
+                        vendor = potential_vendor
+                        break
         
+        # זיהוי סוג תשלום
+        for keyword, ptype in payment_type_keywords.items():
+            if keyword in text:
+                payment_type = ptype
+                break
+        
+        # זיהוי קטגוריה לפי מילות מפתח
+        category_keywords = {
+            'צלם': 'צילום',
+            'צילום': 'צילום',
+            'אולם': 'אולם',
+            'גן': 'אולם',
+            'דיג׳יי': 'מוזיקה',
+            'DJ': 'מוזיקה',
+            'להקה': 'מוזיקה',
+            'זמר': 'מוזיקה',
+            'קייטרינג': 'מזון',
+            'אוכל': 'מזון',
+            'עוגה': 'מזון',
+            'פרחים': 'עיצוב',
+            'עיצוב': 'עיצוב',
+            'שמלה': 'לבוש',
+            'חליפה': 'לבוש',
+            'הזמנות': 'הדפסות'
+        }
+        
+        for keyword, cat in category_keywords.items():
+            if keyword in text:
+                category = cat
+                break
+        
+        # אם מצאנו גם סכום וגם ספק
         if amount and vendor:
             return {
                 'vendor': vendor,
                 'amount': amount,
-                'category': 'אחר',
+                'category': category,
                 'date': datetime.now().strftime('%Y-%m-%d'),
+                'payment_type': payment_type,
                 'payment_method': None,
-                'confidence': 60,
-                'needs_review': True
+                'confidence': 70,
+                'needs_review': False,
+                'source': 'manual_text'
             }
         
         return None

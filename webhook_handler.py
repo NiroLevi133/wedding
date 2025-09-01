@@ -98,7 +98,7 @@ class WebhookHandler:
             return {"status": "error", "error": str(e)}
     
     async def _handle_text_message(self, chat_id: str, message_data: Dict, group_info: Dict) -> Dict:
-        """מטפל בהודעות טקסט"""
+        """מטפל בהודעות טקסט משופר"""
         try:
             text = message_data.get("textMessageData", {}).get("textMessage", "").strip()
             
@@ -107,7 +107,7 @@ class WebhookHandler:
             
             group_id = group_info["whatsapp_group_id"]
             
-            # בדיקת הודעות מערכת מיוחדות
+            # בדיקת הודעות מערכת ותהליך רישום
             if await self._handle_system_commands(chat_id, text, group_info):
                 return {"status": "system_command_handled"}
             
@@ -116,14 +116,33 @@ class WebhookHandler:
             if recent_expense and await self._handle_update_request(chat_id, text, recent_expense, group_info):
                 return {"status": "update_handled"}
             
-            # ניסיון להכנסה ידנית
+            # ניסיון להכנסה ידנית - עם פרסור משופר
             manual_entry = self.messages.parse_manual_entry(text)
             if manual_entry:
+                # שיפור נתוני הספק
+                manual_entry = await self._enhance_vendor_data(manual_entry, group_id)
+                
+                # בדיקת מקדמות אם רלוונטי
+                if manual_entry.get('payment_type') in ['advance', 'final']:
+                    manual_entry = await self._handle_advance_payments(manual_entry, group_id)
+                
                 return await self._save_manual_expense(chat_id, manual_entry, group_info)
             
-            # הודעה רגילה - תגובה כללית
-            await self._send_message(chat_id, self.messages.help_message())
-            return {"status": "help_sent"}
+            # אם זה נראה כמו ניסיון להכניס הוצאה אבל נכשל
+            if any(word in text for word in ['שילמתי', 'שילמנו', 'עלה', 'קניתי', 'הזמנתי']):
+                await self._send_message(
+                    chat_id,
+                    """😅 לא הצלחתי להבין את ההוצאה.
+                    
+    נסו לכתוב בפורמט:
+    💰 שילמתי 2000 לצלם
+    💰 5000 מקדמה לאולם
+    💰 עלה לנו 1500 בחנות פרחים"""
+                )
+                return {"status": "parse_failed"}
+            
+            # הודעה רגילה - לא שולח עזרה אוטומטית
+            return {"status": "regular_message"}
             
         except Exception as e:
             logger.error(f"Text message handling failed: {e}")
@@ -189,90 +208,142 @@ class WebhookHandler:
             return {"status": "error", "error": str(e)}
     
     async def _handle_system_commands(self, chat_id: str, text: str, group_info: Dict) -> bool:
-        """מטפל בפקודות מערכת"""
+        """מטפל בפקודות מערכת ותהליך רישום"""
         text_lower = text.lower().strip()
         
-        # פקודת עזרה
+        # בדיקה אם אנחנו בתהליך רישום
+        if not group_info.get('wedding_date'):
+            # שלב 1: קבלת תאריך חתונה
+            date_match = re.search(r'(\d{1,2})[/./-](\d{1,2})[/./-](\d{2,4})', text)
+            if date_match:
+                day, month, year = date_match.groups()
+                if len(year) == 2:
+                    year = f"20{year}"
+                wedding_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+                
+                # עדכון בדאטה בייס
+                self.db.update_couple_field(group_info['whatsapp_group_id'], 'wedding_date', wedding_date)
+                
+                # שאלה על תקציב
+                await self._send_message(
+                    chat_id, 
+                    f"""✨ מעולה! התאריך נשמר: {day}/{month}/{year}
+
+    💰 עכשיו בואו נגדיר תקציב - כמה תכננתם להוציא על החתונה?
+    (אם עדיין לא החלטתם, כתבו "אין עדיין")"""
+                )
+                return True
+        
+        elif not group_info.get('budget') or group_info['budget'] == 'אין עדיין':
+            # שלב 2: קבלת תקציב
+            if text_lower in ['אין', 'אין עדיין', 'לא יודע', 'לא יודעים']:
+                # עדכון שאין תקציב
+                self.db.update_couple_field(group_info['whatsapp_group_id'], 'budget', 'אין עדיין')
+                
+                await self._send_message(
+                    chat_id,
+                    """✅ אין בעיה! תמיד אפשר להוסיף תקציב מאוחר יותר.
+
+    🎉 הכל מוכן! מעכשיו פשוט שלחו תמונות של קבלות ואני אדאג לכל השאר!
+
+    💡 טיפ: אפשר גם לכתוב "שילמתי 2000 לצלם" ואני אשמור את זה"""
+                )
+                return True
+                
+            budget_match = re.search(r'(\d+(?:,?\d{3})*(?:\.\d+)?)', text)
+            if budget_match:
+                budget = float(budget_match.group(1).replace(',', ''))
+                
+                # עדכון בדאטה בייס
+                self.db.update_couple_field(group_info['whatsapp_group_id'], 'budget', str(budget))
+                
+                await self._send_message(
+                    chat_id,
+                    f"""✅ תקציב נשמר: {budget:,.0f} ₪
+
+    🎉 מושלם! המערכת מוכנה לעבודה!
+
+    📸 שלחו תמונות קבלות או כתבו הוצאות ואני אסדר הכל
+    💡 דוגמה: "שילמתי 5000 מקדמה לצלם" """
+                )
+                return True
+        
+        # פקודות רגילות
         if text_lower in ["עזרה", "help", "מה אתה עושה"]:
             await self._send_message(chat_id, self.messages.help_message())
             return True
         
-        # הגדרת תקציב (אם עדיין לא הוגדר)
-        if not group_info.get('budget') or group_info['budget'] == 'אין עדיין':
-            budget_match = re.search(r'(\d+(?:,\d{3})*(?:\.\d+)?)', text)
-            if budget_match:
-                budget = float(budget_match.group(1).replace(',', ''))
-                # כאן צריך לעדכן בדאטה בייס את התקציב
-                await self._send_message(chat_id, f"תקציב עודכן ל-{budget:,.0f} ש״ח")
-                return True
-        
-        # הגדרת תאריך חתונה (אם עדיין לא הוגדר)
-        if not group_info.get('wedding_date'):
-            date_match = re.search(r'(\d{1,2})[/./-](\d{1,2})[/./-](\d{4})', text)
-            if date_match:
-                day, month, year = date_match.groups()
-                wedding_date = f"{year}-{month.zfill(2)}-{day.zfill(2)}"
-                # כאן צריך לעדכן בדאטה בייס את התאריך
-                await self._send_message(chat_id, f"תאריך החתונה עודכן ל-{day}/{month}/{year}")
-                return True
-        
         return False
     
 
-    async def _handle_update_request(self, chat_id: str, text: str, recent_expense: Dict, group_info: Dict) -> bool:
-        """מטפל בבקשות עדכון"""
-        try:
-            # בדיקת חלון זמן (רק 10 דקות אחרי הקבלה)
-            if not self._is_within_edit_window(recent_expense):
-                return False
-            
-            # ניתוח הודעה עם AI
-            update_request = self.ai.analyze_message_for_updates(text, recent_expense)
-            
-            if not update_request or not update_request.get('is_update'):
-                return False
-            
-            update_type = update_request.get('update_type')
-            new_value = update_request.get('new_value')
-            
-            # ביצוע העדכון
-            if update_type == "delete":
-                success = self._delete_expense(recent_expense['expense_id'])
-                if success:
-                    await self._send_message(chat_id, self.messages.receipt_deleted_success(recent_expense))
-                    return True
-            
-            else:
-                # עדכון שדה ספציפי
-                updated_expense = recent_expense.copy()
-                
-                if update_type == "vendor":
-                    updated_expense['vendor'] = new_value
-                elif update_type == "amount":
-                    try:
-                        updated_expense['amount'] = float(new_value)
-                    except ValueError:
-                        return False
-                elif update_type == "category":
-                    if new_value in CATEGORY_LIST:
-                        updated_expense['category'] = new_value
-                    else:
-                        return False
-                
-                # שמירת העדכון
-                success = await self._update_expense(updated_expense)
-                if success:
-                    message = self.messages.receipt_updated_success(updated_expense, update_type)
-                    await self._send_message(chat_id, message)
-                    
-                    # עדכון cache
-                    self.last_expenses_by_group[group_info["whatsapp_group_id"]] = updated_expense
-                    return True
-            
-        except Exception as e:
-            logger.error(f"Update request handling failed: {e}")
+async def _handle_update_request(self, chat_id: str, text: str, recent_expense: Dict, group_info: Dict) -> bool:
+    """מטפל בבקשות עדכון עם שמירה לדאטה בייס"""
+    try:
+        # בדיקת חלון זמן (10 דקות)
+        if not self._is_within_edit_window(recent_expense):
+            return False
         
-        return False
+        # ניתוח הודעה עם AI
+        update_request = self.ai.analyze_message_for_updates(text, recent_expense)
+        
+        if not update_request or not update_request.get('is_update'):
+            return False
+        
+        update_type = update_request.get('update_type')
+        new_value = update_request.get('new_value')
+        
+        # ביצוע העדכון
+        if update_type == "delete":
+            # מחיקה אמיתית
+            success = self.db.delete_expense(recent_expense['expense_id'])
+            if success:
+                await self._send_message(chat_id, self.messages.receipt_deleted_success(recent_expense))
+                # הסר מ-cache
+                if group_info["whatsapp_group_id"] in self.last_expenses_by_group:
+                    del self.last_expenses_by_group[group_info["whatsapp_group_id"]]
+                return True
+        
+        else:
+            # הכן עדכונים
+            updates = {}
+            
+            if update_type == "vendor":
+                updates['vendor'] = new_value
+                # נסה לשפר קטגוריה
+                enhanced = self.ai.enhance_vendor_with_category(new_value)
+                if enhanced['confidence'] > 70:
+                    updates['category'] = enhanced['category']
+                    
+            elif update_type == "amount":
+                try:
+                    updates['amount'] = float(new_value)
+                except ValueError:
+                    return False
+                    
+            elif update_type == "category":
+                if new_value in CATEGORY_LIST:
+                    updates['category'] = new_value
+                else:
+                    return False
+            
+            # עדכון בדאטה בייס
+            success = self.db.update_expense(recent_expense['expense_id'], updates)
+            
+            if success:
+                # עדכן את recent_expense
+                recent_expense.update(updates)
+                
+                message = self.messages.receipt_updated_success(recent_expense, update_type)
+                await self._send_message(chat_id, message)
+                
+                # עדכון cache
+                self.last_expenses_by_group[group_info["whatsapp_group_id"]] = recent_expense
+                return True
+        
+    except Exception as e:
+        logger.error(f"Update request handling failed: {e}")
+    
+    return False
     
     def _is_image_unclear(self, receipt_data: Dict) -> bool:
         """בודק אם התמונה לא ברורה (חסרים 2+ שדות חשובים)"""
@@ -508,7 +579,49 @@ class WebhookHandler:
         except Exception as e:
             logger.error(f"Failed to send message to {chat_id}: {e}")
             return False
+async def _handle_advance_payments(self, receipt_data: Dict, group_id: str) -> Dict:
+    """מטפל בזיהוי מקדמות רק לספקים רלוונטיים"""
+    vendor = receipt_data.get('vendor', '').lower()
+    category = receipt_data.get('category', '')
     
+    if not vendor:
+        return receipt_data
+    
+    # בדיקה אם זה ספק שמקבל מקדמות
+    is_advance_vendor = False
+    
+    # בדיקה לפי קטגוריה
+    if category in ['אולם', 'צילום', 'מוזיקה', 'מזון']:
+        is_advance_vendor = True
+    else:
+        # בדיקה לפי שם הספק
+        for cat, keywords in ADVANCE_PAYMENT_VENDORS.items():
+            if any(keyword in vendor for keyword in keywords):
+                is_advance_vendor = True
+                break
+    
+    # אם זה לא ספק של מקדמות - תמיד תשלום מלא
+    if not is_advance_vendor:
+        receipt_data['payment_type'] = 'full'
+        return receipt_data
+    
+    # אם כן - בדוק תשלומים קודמים
+    related_expenses = self.db.find_related_expenses(vendor, group_id)
+    
+    if not related_expenses:
+        # תשלום ראשון לספק מקדמות - מקדמה
+        receipt_data['payment_type'] = 'advance'
+    else:
+        # תשלום נוסף - הופך לסופי
+        receipt_data['payment_type'] = 'final'
+        
+        # עדכון התשלומים הקודמים למקדמות
+        for i, expense in enumerate(related_expenses):
+            payment_type = f"advance_{i+1}" if len(related_expenses) > 1 else "advance"
+            self.db.update_expense(expense['expense_id'], {'payment_type': payment_type})
+    
+    return receipt_data
+
     # === סיכומים שבועיים ===
     
     async def send_weekly_summaries(self) -> Dict[str, int]:

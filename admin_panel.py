@@ -5,8 +5,13 @@ from typing import Dict, List, Optional
 from collections import defaultdict
 from database_manager import DatabaseManager
 from config import WEDDING_CATEGORIES, AI_SETTINGS
-
+from zoneinfo import ZoneInfo
+import os
 logger = logging.getLogger(__name__)
+
+DEFAULT_TZ = ZoneInfo(os.getenv("DEFAULT_TIMEZONE", "UTC"))
+
+now = datetime.now(DEFAULT_TZ)
 
 class AdminPanel:
     """מנהל דשבורד מנהל המערכת"""
@@ -68,7 +73,7 @@ class AdminPanel:
                     date_str = expense.get('date', '')
                     if date_str:
                         try:
-                            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+                            date_obj = datetime.strptime(date_str, '%Y-%m-%d').replace(tzinfo=DEFAULT_TZ)
                             month_key = date_obj.strftime('%Y-%m')
                             monthly_stats[month_key]['count'] += 1
                             monthly_stats[month_key]['amount'] += amount
@@ -92,7 +97,7 @@ class AdminPanel:
                 'needs_review_count': needs_review_count,
                 'categories_stats': dict(categories_stats),
                 'monthly_stats': dict(monthly_stats),
-                'last_updated': datetime.now().isoformat()
+                'last_updated': datetime.now(DEFAULT_TZ).isoformat()
             }
             
         except Exception as e:
@@ -151,6 +156,8 @@ class AdminPanel:
                     if created_at:
                         try:
                             expense_date = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            if expense_date.tzinfo is None:
+                                expense_date = expense_date.replace(tzinfo=DEFAULT_TZ)
                             if not last_activity or expense_date > last_activity:
                                 last_activity = expense_date
                         except ValueError:
@@ -780,11 +787,11 @@ class AdminPanel:
             wedding_date = couple.get('wedding_date', '')
             if wedding_date:
                 try:
-                    date_obj = datetime.strptime(wedding_date, '%Y-%m-%d')
+                    # ✅ FIX: wedding_date aware
+                    date_obj = datetime.strptime(wedding_date, '%Y-%m-%d').replace(tzinfo=DEFAULT_TZ)
+                    now = datetime.now(DEFAULT_TZ)
                     wedding_display = date_obj.strftime('%d/%m/%Y')
-                    
-                    # חישוב ימים
-                    days_left = (date_obj - datetime.now()).days
+                    days_left = (date_obj - now).days
                     if days_left > 0:
                         wedding_display += f" ({days_left} ימים)"
                     elif days_left == 0:
@@ -796,7 +803,6 @@ class AdminPanel:
             else:
                 wedding_display = "לא הוגדר"
             
-            # תקציב
             budget = couple.get('budget', '')
             if budget and budget != 'אין עדיין':
                 try:
@@ -806,12 +812,15 @@ class AdminPanel:
             else:
                 budget_display = "לא הוגדר"
             
-            # פעילות אחרונה
             last_activity = couple.get('last_activity')
             if last_activity:
                 try:
                     activity_date = datetime.fromisoformat(last_activity.replace('Z', '+00:00'))
-                    days_ago = (datetime.now() - activity_date).days
+                    # ✅ FIX: לוודא tzinfo
+                    if activity_date.tzinfo is None:
+                        activity_date = activity_date.replace(tzinfo=DEFAULT_TZ)
+                    now = datetime.now(DEFAULT_TZ)
+                    days_ago = (now - activity_date).days
                     
                     if days_ago == 0:
                         activity_display = "היום"
